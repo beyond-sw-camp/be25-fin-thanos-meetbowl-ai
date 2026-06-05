@@ -1,0 +1,357 @@
+# Meetbowl ai-server API 명세서
+
+## 1. 역할
+
+`meetbowl-ai`는 Meetbowl의 AI 처리 서버다.
+
+담당 범위:
+
+- STT 원문 기반 AI 회의록 초안 생성
+- 회의록 재생성/요약
+- 회의 중 실시간 피드백 생성
+- 이전 결정사항 리마인드
+- 중복 논의 감지
+- 피드백 근거 회의록 연결
+- AI 챗봇 답변 생성
+- 권한 기반 RAG 검색
+- Qdrant 기반 벡터 검색
+- LLM Provider 호출
+
+`meetbowl-ai`는 프론트엔드가 직접 호출하지 않는다.
+
+---
+
+## 2. 공통 규칙
+
+### Base URL
+
+```text
+/api/v1
+```
+
+### 인증
+
+내부 서버 간 인증을 사용한다.
+
+```http
+X-Internal-Token: {internalToken}
+```
+
+### 공통 성공 응답
+
+```json
+{
+  "success": true,
+  "data": {},
+  "message": null
+}
+```
+
+### 공통 실패 응답
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "AI_ERROR_CODE",
+    "message": "오류 메시지",
+    "details": []
+  }
+}
+```
+
+---
+
+## 3. Error Code
+
+| Code | HTTP | 설명 |
+|---|---:|---|
+| `AI_PROVIDER_UNAVAILABLE` | 503 | LLM/Embedding Provider 장애 |
+| `AI_RESPONSE_PARSE_FAILED` | 502 | LLM 응답 파싱 실패 |
+| `AI_RESPONSE_VALIDATION_FAILED` | 502 | LLM 응답 스키마 검증 실패 |
+| `AI_RAG_ACCESS_DENIED` | 403 | 권한 없는 RAG 접근 |
+| `AI_CONTEXT_NOT_FOUND` | 404 | 답변/피드백 생성 컨텍스트 없음 |
+| `AI_DOCUMENT_INDEX_FAILED` | 500 | 문서 색인 실패 |
+| `AI_FEEDBACK_GENERATION_FAILED` | 500 | 피드백 생성 실패 |
+
+---
+
+## 4. Health API
+
+| Method | Endpoint | 설명 | 호출 주체 |
+|---|---|---|---|
+| GET | `/health` | 서버 상태 확인 | Infra/API Server |
+| GET | `/health/llm` | LLM Provider 연결 상태 확인 | Infra/API Server |
+| GET | `/health/vector-store` | Qdrant 연결 상태 확인 | Infra/API Server |
+
+---
+
+## 5. Meeting Minutes Generation API
+
+관련 요구사항:
+
+```text
+FR-041
+FR-142~146
+```
+
+회의 종료 후 자동 회의록 생성과 수동 재생성의 운영 기본 경로는 RabbitMQ Consumer다.
+
+REST API는 테스트, 관리성 수동 호출, 장애 대응용 재처리 경로로 사용한다.
+
+| Method | Endpoint | 설명 | 호출 주체 |
+|---|---|---|---|
+| POST | `/minutes/generate` | 회의록 초안 생성 | meetbowl-be/RabbitMQ Consumer |
+| POST | `/minutes/regenerate` | 회의록 초안 재생성 | meetbowl-be |
+| POST | `/minutes/summarize` | 회의 원문 요약 | meetbowl-be |
+| POST | `/minutes/extract-actions` | 결정사항/후속 조치 추출 | meetbowl-be |
+
+### POST `/minutes/generate`
+
+#### Request
+
+```json
+{
+  "meetingId": "uuid",
+  "organizationId": "uuid",
+  "hostUserId": "uuid",
+  "reviewerUserId": "uuid",
+  "title": "회의 제목",
+  "startedAt": "2026-06-02T00:00:00Z",
+  "endedAt": "2026-06-02T01:00:00Z",
+  "participants": [
+    {
+      "userId": "uuid",
+      "name": "홍길동",
+      "department": "기획팀"
+    }
+  ],
+  "transcripts": [
+    {
+      "speakerId": "speaker-1",
+      "speakerName": "홍길동",
+      "startedAtMs": 1000,
+      "endedAtMs": 5000,
+      "text": "오늘 회의 안건은..."
+    }
+  ]
+}
+```
+
+#### Response
+
+```json
+{
+  "success": true,
+  "data": {
+    "meetingId": "uuid",
+    "status": "DRAFT",
+    "minutesDraft": {
+      "summary": "회의 요약",
+      "agendaItems": [
+        {
+          "title": "안건명",
+          "discussion": "논의 내용",
+          "decision": "결정 사항"
+        }
+      ],
+      "decisions": ["결정사항 1"],
+      "actionItems": [
+        {
+          "content": "후속 조치",
+          "assigneeName": "홍길동",
+          "dueDate": null
+        }
+      ]
+    },
+    "model": "llm-model-name",
+    "promptVersion": "minutes-v1",
+    "generatedAt": "2026-06-02T01:05:00Z"
+  },
+  "message": null
+}
+```
+
+---
+
+## 6. Real-time Meeting Feedback API
+
+실시간 피드백은 REST보다 Redis Stream 소비 방식이 기본이다.
+
+REST API는 테스트/수동 호출/폴백 용도로 둔다.
+
+| Method | Endpoint | 설명 | 호출 주체 |
+|---|---|---|---|
+| POST | `/meeting-feedback/analyze` | 현재 발화 기반 실시간 피드백 생성 | meetbowl-stt/meetbowl-be |
+| POST | `/meeting-feedback/remind-decisions` | 이전 결정사항 리마인드 생성 | meetbowl-stt/meetbowl-be |
+| POST | `/meeting-feedback/detect-duplicate` | 중복 논의 감지 | meetbowl-stt/meetbowl-be |
+
+### Response
+
+```json
+{
+  "success": true,
+  "data": {
+    "feedbackType": "DECISION_REMINDER",
+    "message": "이 안건은 지난 회의에서 이미 A안으로 결정된 이력이 있습니다.",
+    "sources": [
+      {
+        "minutesId": "uuid",
+        "meetingId": "uuid",
+        "title": "지난 회의 제목",
+        "meetingDate": "2026-05-20",
+        "snippet": "A안으로 진행하기로 결정"
+      }
+    ],
+    "model": "llm-model-name",
+    "generatedAt": "2026-06-02T01:10:00Z"
+  },
+  "message": null
+}
+```
+
+---
+
+## 7. Chatbot API
+
+`meetbowl-be`가 사용자 인증과 자료 접근 권한을 검증한 뒤 호출한다.
+
+| Method | Endpoint | 설명 | 호출 주체 |
+|---|---|---|---|
+| POST | `/chat` | AI 챗봇 질의 | meetbowl-be |
+| POST | `/chat/search-context` | 답변 전 권한 기반 컨텍스트 검색 | meetbowl-be |
+
+### POST `/chat`
+
+#### Request
+
+```json
+{
+  "userId": "uuid",
+  "organizationId": "uuid",
+  "sessionId": "uuid",
+  "question": "지난 회의에서 결정된 배포 일정 알려줘",
+  "allowedScopes": [
+    {
+      "type": "BACKUP_MAIL",
+      "resourceIds": ["uuid"]
+    },
+    {
+      "type": "MEETING_MINUTES",
+      "resourceIds": ["uuid"]
+    },
+    {
+      "type": "BOOKMARKED_MINUTES",
+      "resourceIds": ["uuid"]
+    },
+    {
+      "type": "PERSONAL_WORKSPACE",
+      "resourceIds": ["uuid"]
+    },
+    {
+      "type": "SHARED_WORKSPACE",
+      "resourceIds": ["uuid"]
+    },
+    {
+      "type": "SHARED_WORKSPACE_FILE",
+      "resourceIds": ["uuid"]
+    }
+  ]
+}
+```
+
+#### Response
+
+```json
+{
+  "success": true,
+  "data": {
+    "answer": "지난 회의에서는 6월 10일까지 1차 배포를 진행하기로 결정했습니다.",
+    "sources": [
+      {
+        "type": "MEETING_MINUTES",
+        "resourceId": "uuid",
+        "title": "배포 일정 회의록",
+        "snippet": "6월 10일까지 1차 배포"
+      }
+    ],
+    "model": "llm-model-name"
+  },
+  "message": null
+}
+```
+
+권한이 없는 자료는 검색 결과와 답변에 포함하지 않는다.
+
+자료에서 확인되지 않는 내용을 단정하지 않는다.
+
+---
+
+## 8. Embedding / Indexing API
+
+Qdrant 색인은 `meetbowl-ai`가 담당한다. 단, 원본 업무 데이터의 소유권은 `meetbowl-be`에 있다.
+
+문서 색인의 운영 기본 경로는 RabbitMQ `document.index.requested` 이벤트 소비다.
+
+REST API는 테스트, 관리성 수동 호출, 장애 대응용 재처리 경로로 사용한다.
+
+| Method | Endpoint | 설명 | 호출 주체 |
+|---|---|---|---|
+| POST | `/indexes/documents` | 문서 임베딩 및 색인 | meetbowl-be/Event Consumer |
+| DELETE | `/indexes/documents/{documentId}` | 문서 색인 삭제 | meetbowl-be/Event Consumer |
+| POST | `/indexes/search` | 벡터 검색 | meetbowl-be/Internal |
+
+### POST `/indexes/documents`
+
+```json
+{
+  "documentId": "uuid",
+  "documentType": "MEETING_MINUTES",
+  "organizationId": "uuid",
+  "ownerUserId": "uuid",
+  "accessScope": {
+    "userIds": ["uuid"],
+    "departmentIds": ["uuid"],
+    "sharedWorkspaceIds": []
+  },
+  "title": "회의록 제목",
+  "content": "색인할 본문",
+  "metadata": {
+    "meetingId": "uuid",
+    "workspaceId": "uuid",
+    "fileVersionId": "uuid",
+    "createdAt": "2026-06-02T01:00:00Z"
+  }
+}
+```
+
+---
+
+## 9. Queue / Stream Consumer
+
+`meetbowl-ai`는 아래 메시지를 소비할 수 있다.
+
+| Source | Event | 설명 |
+|---|---|---|
+| RabbitMQ `ai.minutes.generate` | `meeting.ended` | 회의 종료 후 회의록 생성 |
+| RabbitMQ `ai.minutes.regenerate` | `minutes.generation.requested` | 회의록 생성/재생성 |
+| RabbitMQ `ai.index.document` | `document.index.requested` | 자료 색인 |
+| Redis Stream | `meeting.feedback.requested` | Final Transcript 기반 실시간 피드백 분석 |
+
+발행:
+
+| Target | Event | 설명 |
+|---|---|---|
+| RabbitMQ | `minutes.generated` | AI 회의록 초안 생성 완료 |
+| Redis Stream | `meeting.feedback.generated` | STT 서버로 실시간 회의 피드백 결과 전달 |
+
+---
+
+## 10. 저장 원칙
+
+- `meetbowl-ai`는 MariaDB에 직접 쓰지 않는다.
+- 회의록 초안 저장 요청의 운영 기본 경로는 RabbitMQ `minutes.generated` 이벤트 발행이다.
+- `meetbowl-be` 내부 API 호출은 장애 대응, 수동 재처리, 테스트 용도로만 사용한다.
+- Qdrant에는 검색용 벡터와 권한 필터용 metadata만 저장한다.
+- AI 답변은 가능한 한 참조 출처를 포함한다.
+- 권한이 없는 자료는 검색 결과와 답변에 포함하지 않는다.
