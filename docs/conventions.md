@@ -108,6 +108,13 @@ query-embedding
 도메인별 `ChatbotLLMProvider`, `MinutesLLMProvider`를 만들거나 Provider Adapter에
 `generate_minutes` 같은 도메인 메서드를 추가하지 않는다.
 
+각 프로필은 Provider, 모델명, temperature를 독립 설정한다. 현재 같은 모델을 사용하더라도
+기능별 설정을 공유하지 않는다.
+
+Embedding은 문서와 질의의 벡터 호환성을 확인한 뒤 모델을 변경한다. 프로필 설정은
+`document-embedding`, `query-embedding`으로 분리하되 같은 검색 공간을 사용하는 경우
+동일 모델과 차원을 유지한다.
+
 Provider Fallback 우선순위:
 
 ```text

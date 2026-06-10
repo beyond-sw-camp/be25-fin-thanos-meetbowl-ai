@@ -24,6 +24,15 @@ class ProviderUnavailableError(AiError):
         super().__init__("AI_PROVIDER_UNAVAILABLE", message, retryable=True, status_code=503)
 
 
+class ModelProfileNotConfiguredError(AiError):
+    def __init__(self, model_profile: str) -> None:
+        super().__init__(
+            "AI_MODEL_PROFILE_NOT_CONFIGURED",
+            f"AI 모델 프로필이 설정되지 않았습니다: {model_profile}",
+            status_code=500,
+        )
+
+
 class ResponseParseError(AiError):
     def __init__(self, message: str = "LLM 응답 파싱에 실패했습니다.") -> None:
         super().__init__("AI_RESPONSE_PARSE_FAILED", message, status_code=502)

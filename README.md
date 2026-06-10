@@ -53,8 +53,18 @@ RABBITMQ_ENABLED=true uv run fastapi dev
 The server consumes `meeting.ended` and `minutes.generation.requested`, then publishes
 `minutes.generated` after Gemini structured-output generation and schema validation.
 
-For local deterministic testing without Gemini, set
-`STRUCTURED_GENERATION_PROVIDER=fake`.
+Generation models are selected by logical profile. The default profiles are
+`minutes-summary`, `chatbot`, and `meeting-feedback`; each has independent provider,
+model, and temperature settings. They currently default to the same Gemini model.
+Embedding settings are independently defined for `document-embedding` and
+`query-embedding`.
+
+For local deterministic minutes testing without Gemini, set:
+
+```bash
+MINUTES_SUMMARY_PROVIDER=fake
+MINUTES_SUMMARY_MODEL=fake-minutes-model
+```
 
 ## Test
 
