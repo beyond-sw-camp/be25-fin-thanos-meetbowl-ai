@@ -7,8 +7,9 @@ import pytest
 
 from app.core.errors import ContextNotFoundError, ResponseValidationError
 from app.pipelines.transcript import normalize_raw_transcript
+from app.ports.generation import StructuredGenerationRequest, StructuredGenerationResult
 from app.providers.fake_context_loader import FakeMinutesContextLoader
-from app.providers.fake_llm import FakeLLMProvider
+from app.providers.fake_generation import FakeStructuredGenerationProvider
 from app.schemas.workflow import MinutesGenerationCommand
 from app.workflows.minutes_generation import MinutesGenerationWorkflow
 
@@ -36,7 +37,8 @@ def test_normalize_raw_transcript_preserves_lines_and_removes_empty_space() -> N
 def test_fake_provider_is_deterministic() -> None:
     workflow = MinutesGenerationWorkflow(
         context_loader=FakeMinutesContextLoader(),
-        llm_provider=FakeLLMProvider("fake"),
+        structured_generation_port=FakeStructuredGenerationProvider("fake"),
+        model_profile="minutes-summary",
         prompt_version="minutes-v1",
     )
 
@@ -54,14 +56,13 @@ def test_fake_provider_is_deterministic() -> None:
 
 def test_workflow_rejects_invalid_provider_result() -> None:
     class InvalidProvider:
-        model_name = "invalid"
-
-        async def generate_minutes(self, **_: Any) -> dict[str, Any]:
-            return {"summary": ""}
+        async def generate_structured(self, _: Any) -> StructuredGenerationResult:
+            return StructuredGenerationResult(output={"summary": ""}, model_name="invalid")
 
     workflow = MinutesGenerationWorkflow(
         context_loader=FakeMinutesContextLoader(),
-        llm_provider=InvalidProvider(),
+        structured_generation_port=InvalidProvider(),
+        model_profile="minutes-summary",
         prompt_version="minutes-v1",
     )
 
@@ -69,10 +70,37 @@ def test_workflow_rejects_invalid_provider_result() -> None:
         asyncio.run(workflow.execute(command()))
 
 
+def test_workflow_requests_minutes_model_profile() -> None:
+    class CapturingProvider:
+        request: StructuredGenerationRequest | None = None
+
+        async def generate_structured(
+            self, request: StructuredGenerationRequest
+        ) -> StructuredGenerationResult:
+            self.request = request
+            return await FakeStructuredGenerationProvider("fake").generate_structured(
+                request
+            )
+
+    provider = CapturingProvider()
+    workflow = MinutesGenerationWorkflow(
+        context_loader=FakeMinutesContextLoader(),
+        structured_generation_port=provider,
+        model_profile="minutes-summary",
+        prompt_version="minutes-v1",
+    )
+
+    asyncio.run(workflow.execute(command()))
+
+    assert provider.request is not None
+    assert provider.request.model_profile == "minutes-summary"
+
+
 def test_workflow_rejects_empty_transcript_context() -> None:
     workflow = MinutesGenerationWorkflow(
         context_loader=FakeMinutesContextLoader(),
-        llm_provider=FakeLLMProvider("fake"),
+        structured_generation_port=FakeStructuredGenerationProvider("fake"),
+        model_profile="minutes-summary",
         prompt_version="minutes-v1",
     )
 

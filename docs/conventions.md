@@ -77,10 +77,13 @@ Pydantic Model을 사용한다.
 
 LLM 호출은 반드시 Provider 추상화를 사용한다.
 
-공통 인터페이스:
+Provider Port는 기능(capability) 단위로 분리한다.
 
 ```text
-LLMProvider
+TextGenerationPort
+StreamingGenerationPort
+StructuredGenerationPort
+EmbeddingPort
 ```
 
 구현체:
@@ -90,6 +93,20 @@ GeminiProvider
 ClaudeProvider
 OpenAIProvider
 ```
+
+Workflow는 실제 Provider 모델명이 아니라 `model_profile`을 요청한다.
+Provider Adapter 또는 라우터가 profile을 실제 Provider/모델로 매핑한다.
+
+```text
+chatbot
+minutes-summary
+meeting-feedback
+document-embedding
+query-embedding
+```
+
+도메인별 `ChatbotLLMProvider`, `MinutesLLMProvider`를 만들거나 Provider Adapter에
+`generate_minutes` 같은 도메인 메서드를 추가하지 않는다.
 
 Provider Fallback 우선순위:
 

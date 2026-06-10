@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 from app.core.config import Settings
 from app.main import create_app
 
-client = TestClient(create_app(settings=Settings(llm_provider="fake")))
+client = TestClient(create_app(settings=Settings(structured_generation_provider="fake")))
 
 
 def valid_request() -> dict:

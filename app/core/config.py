@@ -13,11 +13,12 @@ class Settings(BaseSettings):
     rabbitmq_minutes_regenerate_queue: str = "ai.minutes.regenerate"
     rabbitmq_minutes_generated_routing_key: str = "minutes.generated"
     rabbitmq_max_retries: int = 3
-    llm_provider: str = "gemini"
+    structured_generation_provider: str = "gemini"
     gemini_api_key: str | None = None
     gemini_model_name: str = "gemini-2.5-flash"
     gemini_temperature: float = 0.2
     fake_model_name: str = "fake-minutes-model"
+    minutes_model_profile: str = "minutes-summary"
     minutes_prompt_version: str = "minutes-v1"
 
 

@@ -4,6 +4,10 @@ Meetbowl AI API server. The minutes pipeline uses the Gemini API for structured 
 minutes generation. RabbitMQ events still use a deterministic fake context loader until
 the meetbowl-be internal context API is available.
 
+Provider ports are split by capability: text, streaming, structured generation, and
+embedding. Workflows request a logical model profile instead of depending on a concrete
+provider or model name.
+
 The generation workflow accepts one normalized `rawTranscript` string. If the upstream
 contract later becomes an utterance list, the context adapter should sort and join the
 utterances into this string before invoking the workflow.
@@ -49,7 +53,8 @@ RABBITMQ_ENABLED=true uv run fastapi dev
 The server consumes `meeting.ended` and `minutes.generation.requested`, then publishes
 `minutes.generated` after Gemini structured-output generation and schema validation.
 
-For local deterministic testing without Gemini, set `LLM_PROVIDER=fake`.
+For local deterministic testing without Gemini, set
+`STRUCTURED_GENERATION_PROVIDER=fake`.
 
 ## Test
 

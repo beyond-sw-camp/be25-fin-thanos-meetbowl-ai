@@ -329,14 +329,18 @@ Provider 직접 호출 코드를 Workflow에 작성하지 않는다.
 
 반드시 Provider Adapter를 통해 호출한다.
 
-권장 구조:
+Provider Port는 도메인이 아니라 기능(capability) 단위로 분리한다.
 
 ```text
-LLMProvider interface
-  ├─ GeminiProvider
-  ├─ OpenAIProvider
-  └─ ClaudeProvider
+TextGenerationPort ───────────────┐
+StreamingGenerationPort ─────────┼─ Gemini/OpenAI/Claude Adapter
+StructuredGenerationPort ────────┘
+EmbeddingPort ───────────────────── Embedding Adapter
 ```
+
+챗봇, 회의록 요약, 실시간 피드백은 Workflow와 Prompt를 분리하되 동일한 생성
+capability Port를 사용할 수 있다. Workflow는 `model_profile`을 요청하고 Adapter 또는
+라우터가 실제 Provider와 모델을 선택한다. 호출 결과에는 실제 사용한 모델명을 포함한다.
 
 Provider 장애 시 fallback 정책을 적용할 수 있어야 한다.
 
