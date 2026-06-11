@@ -37,6 +37,7 @@ The development server starts at `http://127.0.0.1:8000`.
 - OpenAPI docs: `http://127.0.0.1:8000/docs`
 - Health check: `http://127.0.0.1:8000/api/v1/health`
 - Minutes generation: `POST http://127.0.0.1:8000/api/v1/minutes/generate`
+- Chatbot: `POST http://127.0.0.1:8000/api/v1/chat` (`X-Internal-Token` required)
 
 ### RabbitMQ consumer mode
 

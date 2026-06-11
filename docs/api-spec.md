@@ -252,36 +252,22 @@ REST API는 테스트/수동 호출/폴백 용도로 둔다.
 
 ```json
 {
+  "requestId": "uuid",
+  "correlationId": "uuid",
   "userId": "uuid",
   "organizationId": "uuid",
-  "sessionId": "uuid",
   "question": "지난 회의에서 결정된 배포 일정 알려줘",
-  "allowedScopes": [
+  "messageHistory": [
     {
-      "type": "BACKUP_MAIL",
-      "resourceIds": ["uuid"]
+      "role": "user",
+      "content": "배포 관련 자료를 찾아줘"
     },
     {
-      "type": "MEETING_MINUTES",
-      "resourceIds": ["uuid"]
-    },
-    {
-      "type": "BOOKMARKED_MINUTES",
-      "resourceIds": ["uuid"]
-    },
-    {
-      "type": "PERSONAL_WORKSPACE",
-      "resourceIds": ["uuid"]
-    },
-    {
-      "type": "SHARED_WORKSPACE",
-      "resourceIds": ["uuid"]
-    },
-    {
-      "type": "SHARED_WORKSPACE_FILE",
-      "resourceIds": ["uuid"]
+      "role": "assistant",
+      "content": "관련 자료를 찾았습니다. 어떤 내용을 확인할까요?"
     }
-  ]
+  ],
+  "sharedWorkspaceIds": ["uuid"]
 }
 ```
 
@@ -306,7 +292,9 @@ REST API는 테스트/수동 호출/폴백 용도로 둔다.
 }
 ```
 
-권한이 없는 자료는 검색 결과와 답변에 포함하지 않는다.
+Qdrant 검색은 `organizationId`가 일치하면서 `ownerUserId == userId` 또는
+`workspaceId/sharedWorkspaceIds`가 요청의 `sharedWorkspaceIds`에 포함되는 자료로 제한한다.
+권한이 없는 자료는 검색 결과와 답변에 포함하지 않는다. `X-Internal-Token`이 없거나 다르면 403을 반환한다.
 
 자료에서 확인되지 않는 내용을 단정하지 않는다.
 

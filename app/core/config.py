@@ -19,6 +19,11 @@ class Settings(BaseSettings):
     gemini_temperature: float = 0.2
     fake_model_name: str = "fake-minutes-model"
     minutes_prompt_version: str = "minutes-v1"
+    internal_token: str = "meetbowl-local-internal-token-32bytes"
+    qdrant_url: str = "http://localhost:6333"
+    qdrant_collection: str = "meetbowl-documents"
+    gemini_embedding_model_name: str = "text-embedding-004"
+    chat_prompt_version: str = "chat-v1"
 
 
 @lru_cache

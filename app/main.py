@@ -38,6 +38,7 @@ def create_app(
         lifespan=lifespan,
     )
     app.state.container = resolved_container
+    app.state.settings = resolved_settings
     app.include_router(api_v1_router, prefix="/api/v1")
 
     @app.exception_handler(AiError)
