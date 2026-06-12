@@ -37,6 +37,34 @@ The development server starts at `http://127.0.0.1:8000`.
 - OpenAPI docs: `http://127.0.0.1:8000/docs`
 - Health check: `http://127.0.0.1:8000/api/v1/health`
 - Minutes generation: `POST http://127.0.0.1:8000/api/v1/minutes/generate`
+- Chatbot: `POST http://127.0.0.1:8000/api/v1/chat` (`X-Internal-Token` required)
+
+The chatbot API uses a dedicated BE contract translator. API request/response schemas are
+kept separate from the internal `ChatCommand` and `ChatResult` workflow contracts.
+The existing minutes workflow remains independently configured and available; adding the
+chatbot does not replace the minutes provider, endpoint, event flow, or Tiptap conversion.
+
+Documents can be indexed through `POST /api/v1/indexes/documents`. The indexer stores
+chat source metadata and the BE-provided owner/workspace access scope in Qdrant. For a
+local Qdrant integration test without a Gemini key, run:
+
+```bash
+RUN_RAG_E2E=true uv run pytest -q tests/test_rag_e2e.py -s
+```
+
+This test uses a dedicated temporary collection and verifies backup mail, personal memo,
+personal drive file, shared workspace file version, meeting minutes, and workspace access
+denial. Set `GEMINI_API_KEY` and `LLM_PROVIDER=gemini` to verify production embeddings and
+LLM-generated answers.
+
+With a valid Gemini key, run the production-path integration test:
+
+```bash
+RUN_GEMINI_RAG_E2E=true uv run pytest -q tests/test_gemini_rag_e2e.py -s
+```
+
+This uses `gemini-embedding-001`, a temporary 3072-dimensional Qdrant collection, and the
+configured Gemini generation model. The collection is removed after the test.
 
 ### RabbitMQ consumer mode
 
