@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import Field
@@ -7,6 +8,24 @@ from app.schemas.base import UtcDatetimeModel
 
 
 class AccessScope(UtcDatetimeModel):
+from app.schemas.base import ApiModel
+from app.schemas.chat import ChatSourceType
+
+
+# BE가 색인을 요청할 수 있는 문서 유형(백업 메일, 회의록, 개인 메모/드라이브, 공유 워크스페이스 파일).
+DocumentType = Literal[
+    "BACKUP_MAIL",
+    "MEETING_MINUTES",
+    "MINUTES",
+    "PERSONAL_MEMO",
+    "PERSONAL_DRIVE_FILE",
+    "SHARED_WORKSPACE_FILE_VERSION",
+]
+
+
+class DocumentAccessScope(ApiModel):
+    """문서를 조회할 수 있는 권한 범위(사용자/부서/공유 워크스페이스)."""
+
     user_ids: list[UUID] = Field(default_factory=list)
     department_ids: list[UUID] = Field(default_factory=list)
     shared_workspace_ids: list[UUID] = Field(default_factory=list)
