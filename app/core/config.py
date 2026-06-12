@@ -18,12 +18,18 @@ class Settings(BaseSettings):
     gemini_model_name: str = "gemini-2.5-flash"
     gemini_temperature: float = 0.2
     fake_model_name: str = "fake-minutes-model"
+    fake_chat_model_name: str = "fake-chat-model"
+    fake_chat_rag_enabled: bool = False
     minutes_prompt_version: str = "minutes-v1"
     internal_token: str = "meetbowl-local-internal-token-32bytes"
     qdrant_url: str = "http://localhost:6333"
-    qdrant_collection: str = "meetbowl-documents"
-    gemini_embedding_model_name: str = "text-embedding-004"
+    qdrant_collection: str = "meetbowl-documents-gemini"
+    gemini_embedding_model_name: str = "gemini-embedding-001"
     chat_prompt_version: str = "chat-v1"
+    chunk_max_chars: int = 1200
+    chunk_overlap_chars: int = 150
+    rerank_candidate_pool: int = 30
+    rerank_top_n: int = 10
 
 
 @lru_cache

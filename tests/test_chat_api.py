@@ -37,7 +37,7 @@ def test_chat_returns_stateless_structured_response() -> None:
         "data": {
             "answer": "검색 가능한 자료에서 질문의 근거를 확인하지 못했습니다.",
             "sources": [],
-            "model": "fake-minutes-model",
+            "model": "fake-chat-model",
             "promptVersion": "chat-v1",
         },
         "message": None,
