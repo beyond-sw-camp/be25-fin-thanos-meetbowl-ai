@@ -1,18 +1,12 @@
 from datetime import datetime
-from typing import Any, Literal
+from typing import Literal
 from uuid import UUID
 
 from pydantic import Field
 
-from app.schemas.base import UtcDatetimeModel
+from app.schemas.base import ApiModel, UtcDatetimeModel
 
 
-class AccessScope(UtcDatetimeModel):
-from app.schemas.base import ApiModel
-from app.schemas.chat import ChatSourceType
-
-
-# BE가 색인을 요청할 수 있는 문서 유형(백업 메일, 회의록, 개인 메모/드라이브, 공유 워크스페이스 파일).
 DocumentType = Literal[
     "BACKUP_MAIL",
     "MEETING_MINUTES",
@@ -23,9 +17,7 @@ DocumentType = Literal[
 ]
 
 
-class DocumentAccessScope(ApiModel):
-    """문서를 조회할 수 있는 권한 범위(사용자/부서/공유 워크스페이스)."""
-
+class AccessScope(UtcDatetimeModel):
     user_ids: list[UUID] = Field(default_factory=list)
     department_ids: list[UUID] = Field(default_factory=list)
     shared_workspace_ids: list[UUID] = Field(default_factory=list)
@@ -55,9 +47,20 @@ class DocumentMetadata(UtcDatetimeModel):
         )
 
 
+class IndexDocumentRequest(ApiModel):
+    document_id: UUID
+    document_type: DocumentType
+    organization_id: UUID
+    owner_user_id: UUID
+    title: str = Field(min_length=1)
+    content: str = Field(min_length=1)
+    metadata: DocumentMetadata = Field(default_factory=DocumentMetadata)
+    access_scope: AccessScope
+
+
 class IndexDocumentCommand(UtcDatetimeModel):
     document_id: UUID
-    document_type: str = Field(min_length=1)
+    document_type: DocumentType
     organization_id: UUID
     owner_user_id: UUID
     title: str = Field(min_length=1)
@@ -75,7 +78,13 @@ class DocumentChunk(UtcDatetimeModel):
 
 class DocumentIndexingResult(UtcDatetimeModel):
     document_id: UUID
-    document_type: str
+    document_type: DocumentType
     chunk_count: int = Field(ge=1)
     embedding_model: str
     indexed_at: datetime
+
+
+class IndexDocumentSuccessResponse(ApiModel):
+    success: bool = True
+    data: DocumentIndexingResult
+    message: str | None = None

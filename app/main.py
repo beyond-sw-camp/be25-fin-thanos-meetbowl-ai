@@ -21,6 +21,7 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        app.state.settings = resolved_settings
         app.state.container = resolved_container
         rabbit_runtime: RabbitRuntime | None = None
         if resolved_settings.rabbitmq_enabled:
@@ -40,6 +41,7 @@ def create_app(
         version="0.1.0",
         lifespan=lifespan,
     )
+    app.state.settings = resolved_settings
     app.state.container = resolved_container
     app.state.settings = resolved_settings
     app.include_router(api_v1_router, prefix="/api/v1")
