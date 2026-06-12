@@ -4,6 +4,10 @@ Meetbowl AI API server. The minutes pipeline uses the Gemini API for structured 
 minutes generation. RabbitMQ events still use a deterministic fake context loader until
 the meetbowl-be internal context API is available.
 
+Provider ports are split by capability: text, streaming, structured generation, and
+embedding. Workflows request a logical model profile instead of depending on a concrete
+provider or model name.
+
 The generation workflow accepts one normalized `rawTranscript` string. If the upstream
 contract later becomes an utterance list, the context adapter should sort and join the
 utterances into this string before invoking the workflow.
@@ -23,6 +27,8 @@ cp .env.example .env
 ```
 
 Set `GEMINI_API_KEY` in `.env`. The default model is `gemini-2.5-flash`.
+For embeddings, set `OPENAI_API_KEY`. The default embedding model is
+`text-embedding-3-large`.
 
 ### API-only mode
 
@@ -74,10 +80,28 @@ Start the RabbitMQ configuration from `meetbowl-infra`, then enable the consumer
 RABBITMQ_ENABLED=true uv run fastapi dev
 ```
 
-The server consumes `meeting.ended` and `minutes.generation.requested`, then publishes
-`minutes.generated` after Gemini structured-output generation and schema validation.
+The server consumes `meeting.ended`, `minutes.generation.requested`, and
+`document.index.requested`. It publishes `minutes.generated` after Gemini
+structured-output generation and schema validation, and it writes approved-document
+embeddings into Qdrant for `document.index.requested`.
 
-For local deterministic testing without Gemini, set `LLM_PROVIDER=fake`.
+Generation models are selected by logical profile. The default profiles are
+`minutes-summary`, `chatbot`, and `meeting-feedback`; each has independent provider,
+model, and temperature settings. They currently default to the same Gemini model.
+Embedding settings are independently defined for `document-embedding` and
+`query-embedding`. The default provider is OpenAI, and the default model is
+`text-embedding-3-large`.
+
+Document indexing uses `QDRANT_URL`, `QDRANT_COLLECTION`, `DOCUMENT_CHUNK_SIZE`,
+`DOCUMENT_CHUNK_OVERLAP`, and `DOCUMENT_CHUNK_STRATEGY_VERSION`. The default chunk
+strategy is `paragraph-v1`.
+
+For local deterministic minutes testing without Gemini, set:
+
+```bash
+MINUTES_SUMMARY_PROVIDER=fake
+MINUTES_SUMMARY_MODEL=fake-minutes-model
+```
 
 ## Test
 

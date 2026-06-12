@@ -21,22 +21,27 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        app.state.settings = resolved_settings
         app.state.container = resolved_container
         rabbit_runtime: RabbitRuntime | None = None
         if resolved_settings.rabbitmq_enabled:
             rabbit_runtime = RabbitRuntime(
-                resolved_settings, resolved_container.minutes_workflow
+                resolved_settings,
+                resolved_container.minutes_workflow,
+                resolved_container.document_indexing_workflow,
             )
             await rabbit_runtime.start()
         yield
         if rabbit_runtime is not None:
             await rabbit_runtime.stop()
+        await resolved_container.qdrant_vector_store.aclose()
 
     app = FastAPI(
         title="Meetbowl AI API",
         version="0.1.0",
         lifespan=lifespan,
     )
+    app.state.settings = resolved_settings
     app.state.container = resolved_container
     app.state.settings = resolved_settings
     app.include_router(api_v1_router, prefix="/api/v1")

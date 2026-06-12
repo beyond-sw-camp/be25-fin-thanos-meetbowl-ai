@@ -7,7 +7,7 @@ from app.core.errors import ContextNotFoundError
 from app.events.idempotency import InMemoryEventTracker
 from app.events.rabbit import MinutesEventProcessor
 from app.providers.fake_context_loader import FakeMinutesContextLoader
-from app.providers.fake_llm import FakeLLMProvider
+from app.providers.fake_generation import FakeStructuredGenerationProvider
 from app.schemas.events import EventEnvelope
 from app.workflows.minutes_generation import MinutesGenerationWorkflow
 
@@ -36,7 +36,8 @@ class FakePublisher:
 def workflow() -> MinutesGenerationWorkflow:
     return MinutesGenerationWorkflow(
         context_loader=FakeMinutesContextLoader(),
-        llm_provider=FakeLLMProvider("fake"),
+        structured_generation_port=FakeStructuredGenerationProvider("fake"),
+        model_profile="minutes-summary",
         prompt_version="minutes-v1",
     )
 
@@ -97,8 +98,8 @@ def test_success_publishes_generated_event_then_acks() -> None:
     assert publisher.events[0].event_type == "minutes.generated"
     assert publisher.events[0].correlation_id == event.correlation_id
     assert publisher.events[0].event_id != event.event_id
-    # editorContent is intentionally excluded until the root event contract is updated.
-    assert "editorContent" not in publisher.events[0].payload
+    assert publisher.events[0].payload["organizationId"] == event.payload["organizationId"]
+    assert publisher.events[0].payload["editorContent"]["type"] == "doc"
 
 
 def test_regeneration_event_uses_same_workflow() -> None:

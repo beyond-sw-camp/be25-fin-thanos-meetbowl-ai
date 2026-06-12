@@ -7,8 +7,9 @@ from pydantic import ValidationError
 from app.core.config import Settings
 from app.core.errors import AiError
 from app.events.idempotency import InMemoryEventTracker
-from app.events.mapper import command_from_event, generated_event
+from app.events.mapper import command_from_event, generated_event, index_command_from_event
 from app.schemas.events import EventEnvelope
+from app.workflows.document_indexing import DocumentIndexingWorkflow
 from app.workflows.minutes_generation import MinutesGenerationWorkflow
 
 
@@ -72,6 +73,52 @@ class MinutesEventProcessor:
         await message.ack()
 
 
+class DocumentIndexEventProcessor:
+    def __init__(
+        self,
+        *,
+        workflow: DocumentIndexingWorkflow,
+        tracker: InMemoryEventTracker,
+        max_retries: int,
+    ) -> None:
+        self._workflow = workflow
+        self._tracker = tracker
+        self._max_retries = max_retries
+
+    async def process(self, message: IncomingMessage) -> None:
+        try:
+            envelope = EventEnvelope.model_validate_json(message.body)
+        except ValidationError:
+            await message.reject(requeue=False)
+            return
+
+        if self._tracker.is_completed(envelope.event_id):
+            await message.ack()
+            return
+
+        try:
+            command = index_command_from_event(envelope)
+            await self._workflow.execute(command)
+        except AiError as exc:
+            # 계약 오류나 권한 오류는 재시도해도 바뀌지 않으므로 DLQ로 보내고,
+            # provider/Qdrant 같은 일시 장애만 재큐잉한다.
+            if exc.retryable and self._tracker.increment_retry(envelope.event_id) <= self._max_retries:
+                await message.reject(requeue=True)
+            else:
+                await message.reject(requeue=False)
+            return
+        except Exception:
+            if self._tracker.increment_retry(envelope.event_id) <= self._max_retries:
+                await message.reject(requeue=True)
+            else:
+                await message.reject(requeue=False)
+            return
+
+        # Qdrant 교체 저장까지 끝난 뒤에만 ACK해 승인된 회의록 색인 요청이 유실되지 않게 한다.
+        self._tracker.mark_completed(envelope.event_id)
+        await message.ack()
+
+
 class AioPikaEventPublisher:
     def __init__(self, exchange: aio_pika.abc.AbstractExchange, routing_key: str) -> None:
         self._exchange = exchange
@@ -86,9 +133,15 @@ class AioPikaEventPublisher:
 
 
 class RabbitRuntime:
-    def __init__(self, settings: Settings, workflow: MinutesGenerationWorkflow) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        minutes_workflow: MinutesGenerationWorkflow,
+        document_indexing_workflow: DocumentIndexingWorkflow,
+    ) -> None:
         self._settings = settings
-        self._workflow = workflow
+        self._minutes_workflow = minutes_workflow
+        self._document_indexing_workflow = document_indexing_workflow
         self._connection: aio_pika.abc.AbstractRobustConnection | None = None
 
     async def start(self) -> None:
@@ -98,21 +151,31 @@ class RabbitRuntime:
         publisher = AioPikaEventPublisher(
             exchange, self._settings.rabbitmq_minutes_generated_routing_key
         )
-        processor = MinutesEventProcessor(
-            workflow=self._workflow,
+        minutes_processor = MinutesEventProcessor(
+            workflow=self._minutes_workflow,
             publisher=publisher,
+            tracker=InMemoryEventTracker(),
+            max_retries=self._settings.rabbitmq_max_retries,
+        )
+        document_index_processor = DocumentIndexEventProcessor(
+            workflow=self._document_indexing_workflow,
             tracker=InMemoryEventTracker(),
             max_retries=self._settings.rabbitmq_max_retries,
         )
         await self._consume(
             channel,
             self._settings.rabbitmq_minutes_generate_queue,
-            processor.process,
+            minutes_processor.process,
         )
         await self._consume(
             channel,
             self._settings.rabbitmq_minutes_regenerate_queue,
-            processor.process,
+            minutes_processor.process,
+        )
+        await self._consume(
+            channel,
+            self._settings.rabbitmq_document_index_queue,
+            document_index_processor.process,
         )
 
     async def stop(self) -> None:
