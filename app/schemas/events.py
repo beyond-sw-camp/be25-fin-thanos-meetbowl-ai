@@ -5,7 +5,9 @@ from uuid import UUID
 from pydantic import Field
 
 from app.schemas.base import UtcDatetimeModel
+from app.schemas.indexing import AccessScope, DocumentMetadata
 from app.schemas.minutes import ActionItem, AgendaItem
+from app.schemas.tiptap import TiptapDocument
 
 
 class EventEnvelope(UtcDatetimeModel):
@@ -39,11 +41,24 @@ class MinutesGenerationRequestedPayload(UtcDatetimeModel):
 
 class MinutesGeneratedPayload(UtcDatetimeModel):
     meeting_id: UUID
+    organization_id: UUID
     reviewer_user_id: UUID
     status: Literal["DRAFT"]
     summary: str
     agenda_items: list[AgendaItem]
     decisions: list[str]
     action_items: list[ActionItem]
+    editor_content: TiptapDocument
     model: str
     prompt_version: str
+
+
+class DocumentIndexRequestedPayload(UtcDatetimeModel):
+    document_id: UUID
+    document_type: str = Field(min_length=1)
+    organization_id: UUID
+    owner_user_id: UUID
+    title: str = Field(min_length=1)
+    content: str = Field(min_length=1)
+    metadata: DocumentMetadata = Field(default_factory=DocumentMetadata)
+    access_scope: AccessScope

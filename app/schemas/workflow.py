@@ -38,6 +38,7 @@ class MinutesGenerationContext(UtcDatetimeModel):
 
 class MinutesGenerationResult(UtcDatetimeModel):
     meeting_id: UUID
+    organization_id: UUID
     reviewer_user_id: UUID
     status: str = Field(pattern="^DRAFT$")
     minutes_draft: MinutesDraft

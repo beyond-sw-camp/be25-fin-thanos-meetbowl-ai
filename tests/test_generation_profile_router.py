@@ -105,6 +105,17 @@ def test_settings_build_independent_embedding_profiles() -> None:
     assert profiles["query-embedding"].model_name == "query-model"
 
 
+def test_settings_default_embedding_provider_is_openai() -> None:
+    settings = Settings(_env_file=None)
+
+    profiles = {
+        profile.name: profile for profile in settings.embedding_model_profiles()
+    }
+
+    assert profiles["document-embedding"].provider == "openai"
+    assert profiles["query-embedding"].provider == "openai"
+
+
 def test_container_rejects_unsupported_generation_provider_at_startup() -> None:
     settings = Settings(minutes_summary_provider="unsupported")
 

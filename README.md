@@ -27,6 +27,8 @@ cp .env.example .env
 ```
 
 Set `GEMINI_API_KEY` in `.env`. The default model is `gemini-2.5-flash`.
+For embeddings, set `OPENAI_API_KEY`. The default embedding model is
+`text-embedding-3-large`.
 
 ### API-only mode
 
@@ -50,14 +52,21 @@ Start the RabbitMQ configuration from `meetbowl-infra`, then enable the consumer
 RABBITMQ_ENABLED=true uv run fastapi dev
 ```
 
-The server consumes `meeting.ended` and `minutes.generation.requested`, then publishes
-`minutes.generated` after Gemini structured-output generation and schema validation.
+The server consumes `meeting.ended`, `minutes.generation.requested`, and
+`document.index.requested`. It publishes `minutes.generated` after Gemini
+structured-output generation and schema validation, and it writes approved-document
+embeddings into Qdrant for `document.index.requested`.
 
 Generation models are selected by logical profile. The default profiles are
 `minutes-summary`, `chatbot`, and `meeting-feedback`; each has independent provider,
 model, and temperature settings. They currently default to the same Gemini model.
 Embedding settings are independently defined for `document-embedding` and
-`query-embedding`.
+`query-embedding`. The default provider is OpenAI, and the default model is
+`text-embedding-3-large`.
+
+Document indexing uses `QDRANT_URL`, `QDRANT_COLLECTION`, `DOCUMENT_CHUNK_SIZE`,
+`DOCUMENT_CHUNK_OVERLAP`, and `DOCUMENT_CHUNK_STRATEGY_VERSION`. The default chunk
+strategy is `paragraph-v1`.
 
 For local deterministic minutes testing without Gemini, set:
 

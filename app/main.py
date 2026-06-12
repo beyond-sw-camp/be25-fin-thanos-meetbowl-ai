@@ -25,12 +25,15 @@ def create_app(
         rabbit_runtime: RabbitRuntime | None = None
         if resolved_settings.rabbitmq_enabled:
             rabbit_runtime = RabbitRuntime(
-                resolved_settings, resolved_container.minutes_workflow
+                resolved_settings,
+                resolved_container.minutes_workflow,
+                resolved_container.document_indexing_workflow,
             )
             await rabbit_runtime.start()
         yield
         if rabbit_runtime is not None:
             await rabbit_runtime.stop()
+        await resolved_container.qdrant_vector_store.aclose()
 
     app = FastAPI(
         title="Meetbowl AI API",

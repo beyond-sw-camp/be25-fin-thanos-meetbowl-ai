@@ -14,9 +14,12 @@ class Settings(BaseSettings):
     rabbitmq_exchange: str = "meetbowl.topic"
     rabbitmq_minutes_generate_queue: str = "ai.minutes.generate"
     rabbitmq_minutes_regenerate_queue: str = "ai.minutes.regenerate"
+    rabbitmq_document_index_queue: str = "ai.index.document"
     rabbitmq_minutes_generated_routing_key: str = "minutes.generated"
     rabbitmq_max_retries: int = 3
     gemini_api_key: str | None = None
+    openai_api_key: str | None = None
+    openai_base_url: str = "https://api.openai.com/v1"
     minutes_model_profile: str = "minutes-summary"
     minutes_summary_provider: str = "gemini"
     minutes_summary_model: str = "gemini-2.5-flash"
@@ -30,11 +33,16 @@ class Settings(BaseSettings):
     meeting_feedback_model: str = "gemini-2.5-flash"
     meeting_feedback_temperature: float = 0.2
     document_embedding_model_profile: str = "document-embedding"
-    document_embedding_provider: str = "gemini"
-    document_embedding_model: str = "gemini-embedding-001"
+    document_embedding_provider: str = "openai"
+    document_embedding_model: str = "text-embedding-3-large"
+    qdrant_url: str = "http://localhost:6333"
+    qdrant_collection: str = "meetbowl_documents_v1"
+    document_chunk_size: int = 1200
+    document_chunk_overlap: int = 150
+    document_chunk_strategy_version: str = "paragraph-v1"
     query_embedding_model_profile: str = "query-embedding"
-    query_embedding_provider: str = "gemini"
-    query_embedding_model: str = "gemini-embedding-001"
+    query_embedding_provider: str = "openai"
+    query_embedding_model: str = "text-embedding-3-large"
     minutes_prompt_version: str = "minutes-v1"
 
     @model_validator(mode="after")

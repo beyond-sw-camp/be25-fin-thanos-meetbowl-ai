@@ -36,3 +36,18 @@ class ModelProfileNotConfiguredError(AiError):
 class ResponseParseError(AiError):
     def __init__(self, message: str = "LLM 응답 파싱에 실패했습니다.") -> None:
         super().__init__("AI_RESPONSE_PARSE_FAILED", message, status_code=502)
+
+
+class DocumentIndexFailedError(AiError):
+    def __init__(
+        self,
+        message: str = "문서 임베딩 또는 색인 처리에 실패했습니다.",
+        *,
+        retryable: bool = True,
+    ) -> None:
+        super().__init__(
+            "AI_DOCUMENT_INDEX_FAILED",
+            message,
+            retryable=retryable,
+            status_code=503 if retryable else 500,
+        )

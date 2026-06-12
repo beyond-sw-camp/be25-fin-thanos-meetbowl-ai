@@ -54,6 +54,7 @@ class MinutesGenerationWorkflow:
             raise ResponseValidationError() from exc
         return MinutesGenerationResult(
             meeting_id=context.meeting_id,
+            organization_id=context.organization_id,
             reviewer_user_id=context.reviewer_user_id,
             status="DRAFT",
             minutes_draft=draft,
