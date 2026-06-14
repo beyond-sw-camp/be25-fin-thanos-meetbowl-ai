@@ -5,6 +5,7 @@ from uuid import UUID
 from pydantic import Field
 
 from app.schemas.base import UtcDatetimeModel
+from app.schemas.feedback import FeedbackCandidate
 from app.schemas.indexing import AccessScope, DocumentMetadata
 from app.schemas.minutes import ActionItem, AgendaItem
 from app.schemas.tiptap import TiptapDocument
@@ -62,3 +63,25 @@ class DocumentIndexRequestedPayload(UtcDatetimeModel):
     content: str = Field(min_length=1)
     metadata: DocumentMetadata = Field(default_factory=DocumentMetadata)
     access_scope: AccessScope
+
+
+class FeedbackSegmentCreatedPayload(UtcDatetimeModel):
+    meeting_id: UUID
+    session_id: UUID
+    organization_id: UUID
+    participant_user_ids: list[UUID] = Field(default_factory=list, min_length=1)
+    segment_id: UUID
+    sequence: int = Field(ge=0)
+    language: str = Field(min_length=1, max_length=20)
+    text: str = Field(min_length=1, max_length=4_000)
+    is_final: bool = True
+    started_at_ms: int = Field(ge=0)
+    ended_at_ms: int = Field(ge=0)
+
+
+class MeetingFeedbackGeneratedPayload(UtcDatetimeModel):
+    meeting_id: UUID
+    feedback_type: str = Field(min_length=1, max_length=50)
+    message: str = Field(min_length=1, max_length=500)
+    sources: list[FeedbackCandidate] = Field(default_factory=list)
+    generated_at: datetime

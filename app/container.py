@@ -5,6 +5,7 @@ from app.core.model_profiles import EmbeddingModelProfile, GenerationModelProfil
 from app.ports.embedding import EmbeddingPort
 from app.ports.generation import StructuredGenerationPort
 from app.providers.embedding_router import ProfileRoutingEmbeddingProvider
+from app.providers.fake_chat import FakeChatProvider
 from app.providers.fake_context_loader import FakeMinutesContextLoader
 from app.providers.fake_embedding import FakeEmbeddingProvider
 from app.providers.fake_generation import FakeStructuredGenerationProvider
@@ -14,23 +15,12 @@ from app.providers.openai_embedding import OpenAIEmbeddingProvider
 from app.providers.structured_generation_router import (
     ProfileRoutingStructuredGenerationProvider,
 )
+from app.rag.qdrant_feedback import QdrantMeetingFeedbackRetriever
 from app.rag.qdrant_vector_store import QdrantVectorStore
-from app.schemas.chat import ChatCommand, ChatResult
 from app.workflows.chat import ChatWorkflow
 from app.workflows.document_indexing import DocumentIndexingWorkflow
+from app.workflows.meeting_feedback import MeetingFeedbackWorkflow
 from app.workflows.minutes_generation import MinutesGenerationWorkflow
-
-
-class FallbackChatProvider:
-    """충돌 복구 중에도 앱이 기동되도록 최소 응답을 제공하는 챗봇 provider."""
-
-    async def answer(self, command: ChatCommand) -> ChatResult:
-        return ChatResult(
-            answer="현재 로컬 챗봇 provider 구성이 비활성화되어 있습니다.",
-            sources=[],
-            model="fallback-chat",
-            prompt_version="chat-v1",
-        )
 
 
 @dataclass(frozen=True)
@@ -38,6 +28,7 @@ class Container:
     minutes_workflow: MinutesGenerationWorkflow
     document_indexing_workflow: DocumentIndexingWorkflow
     chat_workflow: ChatWorkflow
+    meeting_feedback_workflow: MeetingFeedbackWorkflow
     qdrant_vector_store: QdrantVectorStore
 
 
@@ -59,6 +50,11 @@ def build_container(settings: Settings) -> Container:
         base_url=settings.qdrant_url,
         collection_name=settings.qdrant_collection,
     )
+    feedback_retriever = QdrantMeetingFeedbackRetriever(
+        qdrant_url=settings.qdrant_url,
+        qdrant_collection=settings.qdrant_collection,
+        candidate_limit=settings.feedback_candidate_limit,
+    )
 
     return Container(
         minutes_workflow=MinutesGenerationWorkflow(
@@ -75,7 +71,19 @@ def build_container(settings: Settings) -> Container:
             chunk_overlap=settings.document_chunk_overlap,
             chunk_strategy_version=settings.document_chunk_strategy_version,
         ),
-        chat_workflow=ChatWorkflow(FallbackChatProvider()),
+        chat_workflow=ChatWorkflow(
+            FakeChatProvider(
+                model_name=settings.fake_chat_model_name,
+                prompt_version=settings.chat_prompt_version,
+            )
+        ),
+        meeting_feedback_workflow=MeetingFeedbackWorkflow(
+            embedding_port=embedding_port,
+            retriever=feedback_retriever,
+            query_model_profile=settings.query_embedding_model_profile,
+            prompt_version=settings.feedback_prompt_version,
+            score_threshold=settings.feedback_score_threshold,
+        ),
         qdrant_vector_store=qdrant_vector_store,
     )
 
