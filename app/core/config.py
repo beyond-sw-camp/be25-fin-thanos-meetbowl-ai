@@ -17,6 +17,12 @@ class Settings(BaseSettings):
     rabbitmq_document_index_queue: str = "ai.index.document"
     rabbitmq_minutes_generated_routing_key: str = "minutes.generated"
     rabbitmq_max_retries: int = 3
+    redis_feedback_enabled: bool = False
+    redis_url: str = "redis://localhost:6379"
+    redis_feedback_consumer_group: str = "ai-feedback"
+    redis_feedback_consumer_name: str = "ai-local"
+    redis_feedback_stream_max_length: int = 2000
+    redis_feedback_scan_interval_seconds: float = 1.0
     gemini_api_key: str | None = None
     openai_api_key: str | None = None
     openai_base_url: str = "https://api.openai.com/v1"
@@ -58,6 +64,15 @@ class Settings(BaseSettings):
     chunk_overlap_chars: int = 150
     rerank_candidate_pool: int = 30
     rerank_top_n: int = 10
+    feedback_window_max_segments: int = 8
+    feedback_window_max_seconds: int = 45
+    feedback_min_segments: int = 4
+    feedback_min_window_chars: int = 40
+    feedback_trigger_interval_seconds: int = 15
+    feedback_cooldown_seconds: int = 90
+    feedback_score_threshold: float = 0.78
+    feedback_candidate_limit: int = 3
+    feedback_prompt_version: str = "feedback-rule-v1"
 
     @model_validator(mode="after")
     def validate_unique_model_profiles(self) -> "Settings":

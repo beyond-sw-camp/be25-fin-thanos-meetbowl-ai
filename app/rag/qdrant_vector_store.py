@@ -2,6 +2,7 @@ import httpx
 
 from app.core.errors import DocumentIndexFailedError
 from app.ports.vector_store import ReplaceDocumentRequest
+from app.rag.sparse import SparseEncoder
 
 
 class QdrantVectorStore:
@@ -11,12 +12,14 @@ class QdrantVectorStore:
         base_url: str,
         collection_name: str,
         client: httpx.AsyncClient | None = None,
+        sparse_encoder: SparseEncoder | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._collection_name = collection_name
         self._client = client or httpx.AsyncClient(timeout=10.0)
         self._owns_client = client is None
         self._ensured_dimensions: int | None = None
+        self._sparse_encoder = sparse_encoder or SparseEncoder()
 
     async def replace_document(self, request: ReplaceDocumentRequest) -> None:
         if not request.points:
@@ -43,17 +46,21 @@ class QdrantVectorStore:
                 "PUT",
                 f"/collections/{self._collection_name}",
                 json={
-                    "vectors": {
-                        "size": vector_size,
-                        "distance": "Cosine",
-                    }
+                    "vectors": {"dense": {"size": vector_size, "distance": "Cosine"}},
+                    "sparse_vectors": {"sparse": {"modifier": "idf"}},
                 },
             )
             if create_response.status_code not in (200, 201):
                 raise DocumentIndexFailedError("Qdrant collection 생성에 실패했습니다.")
         else:
             payload = response.json().get("result", {})
-            current_size = payload.get("config", {}).get("params", {}).get("vectors", {}).get("size")
+            current_size = (
+                payload.get("config", {})
+                .get("params", {})
+                .get("vectors", {})
+                .get("dense", {})
+                .get("size")
+            )
             if current_size is not None and current_size != vector_size:
                 # 임베딩 모델 차원과 collection 차원이 다르면 저장 데이터를 복구할 수 없으므로
                 # 재시도 대신 운영 설정 오류로 취급한다.
@@ -88,7 +95,12 @@ class QdrantVectorStore:
                 "points": [
                     {
                         "id": point.point_id,
-                        "vector": point.vector,
+                        "vector": {
+                            "dense": point.vector,
+                            "sparse": self._sparse_encoder.encode(
+                                str(point.payload.get("content", ""))
+                            ),
+                        },
                         "payload": point.payload,
                     }
                     for point in request.points
