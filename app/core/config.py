@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     rabbitmq_minutes_generate_queue: str = "ai.minutes.generate"
     rabbitmq_minutes_regenerate_queue: str = "ai.minutes.regenerate"
     rabbitmq_document_index_queue: str = "ai.index.document"
+    rabbitmq_document_index_removed_queue: str = "ai.index.document.removed"
     rabbitmq_minutes_generated_routing_key: str = "minutes.generated"
     rabbitmq_max_retries: int = 3
     redis_feedback_enabled: bool = False

@@ -69,6 +69,12 @@ class DocumentIndexRequestedPayload(UtcDatetimeModel):
     access_scope: AccessScope
 
 
+class DocumentIndexRemovedPayload(UtcDatetimeModel):
+    """문서가 삭제되어 색인에서 제거해야 함을 알리는 이벤트 payload."""
+
+    document_id: UUID
+
+
 class FeedbackSegmentCreatedPayload(UtcDatetimeModel):
     meeting_id: UUID
     session_id: UUID

@@ -5,6 +5,7 @@ from pydantic import ValidationError
 
 from app.core.errors import AiError
 from app.schemas.events import (
+    DocumentIndexRemovedPayload,
     DocumentIndexRequestedPayload,
     EventEnvelope,
     MeetingEndedPayload,
@@ -18,6 +19,20 @@ MEETING_ENDED = "meeting.ended"
 MINUTES_GENERATION_REQUESTED = "minutes.generation.requested"
 MINUTES_GENERATED = "minutes.generated"
 DOCUMENT_INDEX_REQUESTED = "document.index.requested"
+DOCUMENT_INDEX_REMOVED = "document.index.removed"
+
+
+def removed_document_id_from_event(envelope: EventEnvelope) -> str:
+    """BE의 `document.index.removed` 이벤트에서 색인 제거 대상 documentId를 꺼낸다."""
+    if envelope.event_type != DOCUMENT_INDEX_REMOVED:
+        raise AiError(
+            "AI_INVALID_EVENT", f"지원하지 않는 이벤트입니다: {envelope.event_type}"
+        )
+    try:
+        payload = DocumentIndexRemovedPayload.model_validate(envelope.payload)
+    except ValidationError as exc:
+        raise AiError("AI_INVALID_EVENT", "이벤트 payload가 올바르지 않습니다.") from exc
+    return str(payload.document_id)
 
 
 def command_from_event(envelope: EventEnvelope) -> MinutesGenerationCommand:

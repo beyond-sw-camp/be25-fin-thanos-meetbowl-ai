@@ -7,7 +7,12 @@ from pydantic import ValidationError
 from app.core.config import Settings
 from app.core.errors import AiError
 from app.events.idempotency import InMemoryEventTracker
-from app.events.mapper import command_from_event, generated_event, index_command_from_event
+from app.events.mapper import (
+    command_from_event,
+    generated_event,
+    index_command_from_event,
+    removed_document_id_from_event,
+)
 from app.schemas.events import EventEnvelope
 from app.workflows.document_indexing import DocumentIndexingWorkflow
 from app.workflows.minutes_generation import MinutesGenerationWorkflow
@@ -122,6 +127,51 @@ class DocumentIndexEventProcessor:
         await message.ack()
 
 
+class DocumentIndexRemovedEventProcessor:
+    """BE의 색인 제거 이벤트를 소비해 삭제된 문서를 Qdrant 색인에서 제거한다(검색에서 빠지게 한다)."""
+
+    def __init__(
+        self,
+        *,
+        workflow: DocumentIndexingWorkflow,
+        tracker: InMemoryEventTracker,
+        max_retries: int,
+    ) -> None:
+        self._workflow = workflow
+        self._tracker = tracker
+        self._max_retries = max_retries
+
+    async def process(self, message: IncomingMessage) -> None:
+        try:
+            envelope = EventEnvelope.model_validate_json(message.body)
+        except ValidationError:
+            await message.reject(requeue=False)
+            return
+
+        # 같은 제거 이벤트가 다시 와도 멱등하다(이미 지운 문서는 다시 지워도 무방). 중복 처리만 건너뛴다.
+        if self._tracker.is_completed(envelope.event_id):
+            await message.ack()
+            return
+
+        try:
+            document_id = removed_document_id_from_event(envelope)
+            await self._workflow.remove_document(document_id)
+        except AiError:
+            # 잘못된 payload/이벤트 타입은 재시도해도 동일하므로 DLQ로 보낸다.
+            await message.reject(requeue=False)
+            return
+        except Exception:
+            # Qdrant 일시 장애 등은 재큐잉한다.
+            if self._tracker.increment_retry(envelope.event_id) <= self._max_retries:
+                await message.reject(requeue=True)
+            else:
+                await message.reject(requeue=False)
+            return
+
+        self._tracker.mark_completed(envelope.event_id)
+        await message.ack()
+
+
 class AioPikaEventPublisher:
     def __init__(self, exchange: aio_pika.abc.AbstractExchange, routing_key: str) -> None:
         self._exchange = exchange
@@ -165,6 +215,11 @@ class RabbitRuntime:
             tracker=InMemoryEventTracker(),
             max_retries=self._settings.rabbitmq_max_retries,
         )
+        document_index_removed_processor = DocumentIndexRemovedEventProcessor(
+            workflow=self._document_indexing_workflow,
+            tracker=InMemoryEventTracker(),
+            max_retries=self._settings.rabbitmq_max_retries,
+        )
         await self._consume(
             channel,
             self._settings.rabbitmq_minutes_generate_queue,
@@ -179,6 +234,11 @@ class RabbitRuntime:
             channel,
             self._settings.rabbitmq_document_index_queue,
             document_index_processor.process,
+        )
+        await self._consume(
+            channel,
+            self._settings.rabbitmq_document_index_removed_queue,
+            document_index_removed_processor.process,
         )
 
     async def stop(self) -> None:

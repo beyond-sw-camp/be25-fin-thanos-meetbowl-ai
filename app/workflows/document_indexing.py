@@ -32,6 +32,10 @@ class DocumentIndexingWorkflow:
         self._file_storage_port = file_storage_port
         self._file_text_extractor = file_text_extractor
 
+    async def remove_document(self, document_id: str) -> None:
+        """문서 삭제 이벤트를 받아 해당 문서의 색인을 Qdrant에서 제거한다(검색에서 빠지게 한다)."""
+        await self._vector_store_port.delete_document(document_id)
+
     async def _resolve_content(self, command: IndexDocumentCommand) -> str:
         """텍스트 자료는 content를 그대로, 드라이브 파일은 S3에서 받아 추출한 텍스트를 쓴다."""
         if command.content and command.content.strip():
