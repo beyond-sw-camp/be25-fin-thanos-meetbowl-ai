@@ -42,12 +42,17 @@ class S3FileStorage:
     def _get_client(self) -> Any:
         if self._client is None:
             import boto3
+            from botocore.config import Config
 
+            # LocalStack처럼 커스텀 endpoint를 쓰면 path-style(localhost:4566/버킷/키) 주소를 써야 한다.
+            # 실제 AWS(endpoint 없음)는 기본 virtual-host 방식을 그대로 두므로 endpoint 유무로만 분기한다.
+            config = Config(s3={"addressing_style": "path"}) if self._endpoint_url else None
             self._client = boto3.client(
                 "s3",
                 region_name=self._region,
                 endpoint_url=self._endpoint_url,
                 aws_access_key_id=self._access_key_id,
                 aws_secret_access_key=self._secret_access_key,
+                config=config,
             )
         return self._client
