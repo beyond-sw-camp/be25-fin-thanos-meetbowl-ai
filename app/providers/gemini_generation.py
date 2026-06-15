@@ -9,41 +9,44 @@ from app.core.errors import (
     ResponseParseError,
     ResponseValidationError,
 )
-from app.schemas.minutes import MinutesDraft
-from app.schemas.workflow import MinutesGenerationContext
+from app.ports.generation import (
+    StructuredGenerationRequest,
+    StructuredGenerationResult,
+)
 
 
-class GeminiLLMProvider:
+class GeminiStructuredGenerationProvider:
     def __init__(
         self,
         *,
         api_key: str | None,
         model_name: str,
-        temperature: float,
+        default_temperature: float,
         client: Any | None = None,
     ) -> None:
         self._api_key = api_key
         self._model_name = model_name
-        self._temperature = temperature
+        self._default_temperature = default_temperature
         self._client = client
 
-    @property
-    def model_name(self) -> str:
-        return self._model_name
-
-    async def generate_minutes(
-        self, *, prompt: str, context: MinutesGenerationContext
-    ) -> dict[str, Any]:
-        del context
+    async def generate_structured(
+        self, request: StructuredGenerationRequest
+    ) -> StructuredGenerationResult:
         client = self._get_client()
         try:
             response = await client.aio.models.generate_content(
                 model=self._model_name,
-                contents=prompt,
+                contents=request.prompt,
                 config=types.GenerateContentConfig(
-                    temperature=self._temperature,
+                    temperature=(
+                        request.temperature
+                        if request.temperature is not None
+                        else self._default_temperature
+                    ),
                     response_mime_type="application/json",
-                    response_json_schema=MinutesDraft.model_json_schema(by_alias=True),
+                    response_json_schema=request.response_schema.model_json_schema(
+                        by_alias=True
+                    ),
                 ),
             )
         except ProviderUnavailableError:
@@ -54,12 +57,12 @@ class GeminiLLMProvider:
         if not response.text:
             raise ResponseParseError("Gemini가 빈 응답을 반환했습니다.")
         try:
-            draft = MinutesDraft.model_validate_json(response.text)
+            output = request.response_schema.model_validate_json(response.text)
         except ValidationError as exc:
             raise ResponseValidationError() from exc
         except ValueError as exc:
             raise ResponseParseError() from exc
-        return draft.model_dump(mode="json", by_alias=True)
+        return StructuredGenerationResult(output=output, model_name=self._model_name)
 
     def _get_client(self) -> Any:
         if self._client is not None:

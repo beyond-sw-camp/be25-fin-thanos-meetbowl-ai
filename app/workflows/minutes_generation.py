@@ -6,7 +6,10 @@ from app.core.errors import ContextNotFoundError, ResponseValidationError
 from app.pipelines.transcript import normalize_raw_transcript
 from app.pipelines.tiptap import minutes_draft_to_tiptap
 from app.ports.context_loader import MinutesContextLoader
-from app.ports.llm_provider import LLMProvider
+from app.ports.generation import (
+    StructuredGenerationPort,
+    StructuredGenerationRequest,
+)
 from app.prompts.minutes import build_minutes_prompt
 from app.schemas.minutes import MinutesDraft
 from app.schemas.workflow import MinutesGenerationCommand, MinutesGenerationResult
@@ -17,11 +20,13 @@ class MinutesGenerationWorkflow:
         self,
         *,
         context_loader: MinutesContextLoader,
-        llm_provider: LLMProvider,
+        structured_generation_port: StructuredGenerationPort,
+        model_profile: str,
         prompt_version: str,
     ) -> None:
         self._context_loader = context_loader
-        self._llm_provider = llm_provider
+        self._structured_generation_port = structured_generation_port
+        self._model_profile = model_profile
         self._prompt_version = prompt_version
 
     async def execute(self, command: MinutesGenerationCommand) -> MinutesGenerationResult:
@@ -36,18 +41,25 @@ class MinutesGenerationWorkflow:
             prompt_version=prompt_version,
             context=context,
         )
-        raw_result = await self._llm_provider.generate_minutes(prompt=prompt, context=context)
+        generation_result = await self._structured_generation_port.generate_structured(
+            StructuredGenerationRequest(
+                prompt=prompt,
+                response_schema=MinutesDraft,
+                model_profile=self._model_profile,
+            )
+        )
         try:
-            draft = MinutesDraft.model_validate(raw_result)
+            draft = MinutesDraft.model_validate(generation_result.output)
         except ValidationError as exc:
             raise ResponseValidationError() from exc
         return MinutesGenerationResult(
             meeting_id=context.meeting_id,
+            organization_id=context.organization_id,
             reviewer_user_id=context.reviewer_user_id,
             status="DRAFT",
             minutes_draft=draft,
             editor_content=minutes_draft_to_tiptap(draft),
-            model=self._llm_provider.model_name,
+            model=generation_result.model_name,
             prompt_version=prompt_version,
             generated_at=datetime.now(timezone.utc),
         )

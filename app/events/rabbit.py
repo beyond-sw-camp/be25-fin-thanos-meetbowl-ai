@@ -103,6 +103,8 @@ class DocumentIndexEventProcessor:
             command = index_command_from_event(envelope)
             await self._workflow.execute(command)
         except AiError as exc:
+            # 계약 오류나 권한 오류는 재시도해도 바뀌지 않으므로 DLQ로 보내고,
+            # provider/Qdrant 같은 일시 장애만 재큐잉한다.
             if exc.retryable and self._tracker.increment_retry(envelope.event_id) <= self._max_retries:
                 await message.reject(requeue=True)
             else:
@@ -115,6 +117,7 @@ class DocumentIndexEventProcessor:
                 await message.reject(requeue=False)
             return
 
+        # Qdrant 교체 저장까지 끝난 뒤에만 ACK해 승인된 회의록 색인 요청이 유실되지 않게 한다.
         self._tracker.mark_completed(envelope.event_id)
         await message.ack()
 
@@ -157,7 +160,7 @@ class RabbitRuntime:
             tracker=InMemoryEventTracker(),
             max_retries=self._settings.rabbitmq_max_retries,
         )
-        index_processor = DocumentIndexEventProcessor(
+        document_index_processor = DocumentIndexEventProcessor(
             workflow=self._document_indexing_workflow,
             tracker=InMemoryEventTracker(),
             max_retries=self._settings.rabbitmq_max_retries,
@@ -175,7 +178,7 @@ class RabbitRuntime:
         await self._consume(
             channel,
             self._settings.rabbitmq_document_index_queue,
-            index_processor.process,
+            document_index_processor.process,
         )
 
     async def stop(self) -> None:
