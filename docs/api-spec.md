@@ -342,6 +342,11 @@ REST API는 테스트, 관리성 수동 호출, 장애 대응용 재처리 경�
 }
 ```
 
+문서 색인은 두 경로로 트리거된다. ① BE가 RabbitMQ로 발행하는 `document.index.requested`
+이벤트를 AI consumer(`DocumentIndexEventProcessor`)가 소비하는 비동기 경로(운영 기본),
+② 내부 REST `POST /api/v1/indexes/documents`(직접 호출용). 둘 다 같은 색인 workflow로
+수렴한다. 이벤트 payload는 REST 요청 계약(`IndexDocumentRequest`)과 동일한 형식이다.
+
 현재 구현은 문서 본문을 청크로 분할(`chunk_max_chars`/`chunk_overlap_chars`)하고
 각 청크를 제목 문맥과 함께 embedding해 Qdrant에 **청크당 point 1개**로 upsert한다.
 하이브리드 검색을 위해 각 point에는 dense(의미) 벡터와 sparse(BM25, IDF) 벡터를 함께

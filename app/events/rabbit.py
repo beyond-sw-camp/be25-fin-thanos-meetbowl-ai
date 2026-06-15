@@ -74,6 +74,8 @@ class MinutesEventProcessor:
 
 
 class DocumentIndexEventProcessor:
+    """BE의 색인 이벤트를 소비해 문서를 Qdrant에 색인한다(응답 이벤트 없는 fire-and-forget)."""
+
     def __init__(
         self,
         *,
@@ -92,6 +94,7 @@ class DocumentIndexEventProcessor:
             await message.reject(requeue=False)
             return
 
+        # 같은 이벤트가 다시 와도 중복 색인하지 않도록 처리 완료 여부를 먼저 확인한다.
         if self._tracker.is_completed(envelope.event_id):
             await message.ack()
             return
