@@ -50,7 +50,8 @@ class DocumentMetadata(UtcDatetimeModel):
 class IndexDocumentRequest(ApiModel):
     document_id: UUID
     document_type: DocumentType
-    organization_id: UUID
+    # 개인 자료(메모/메일/개인워크)는 조직 미소속 사용자도 색인 대상이므로 organization은 선택값이다.
+    organization_id: UUID | None = None
     owner_user_id: UUID
     title: str = Field(min_length=1)
     content: str = Field(min_length=1)
@@ -61,7 +62,7 @@ class IndexDocumentRequest(ApiModel):
 class IndexDocumentCommand(UtcDatetimeModel):
     document_id: UUID
     document_type: DocumentType
-    organization_id: UUID
+    organization_id: UUID | None = None
     owner_user_id: UUID
     title: str = Field(min_length=1)
     content: str = Field(min_length=1)

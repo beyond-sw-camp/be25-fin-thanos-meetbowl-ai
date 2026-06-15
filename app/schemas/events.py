@@ -57,7 +57,8 @@ class MinutesGeneratedPayload(UtcDatetimeModel):
 class DocumentIndexRequestedPayload(UtcDatetimeModel):
     document_id: UUID
     document_type: str = Field(min_length=1)
-    organization_id: UUID
+    # 개인 자료는 조직 미소속 사용자도 색인 대상이므로 organization은 선택값이다.
+    organization_id: UUID | None = None
     owner_user_id: UUID
     title: str = Field(min_length=1)
     content: str = Field(min_length=1)

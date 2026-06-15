@@ -91,7 +91,12 @@ class DocumentIndexingWorkflow:
                     "chunkStrategyVersion": self._chunk_strategy_version,
                     "title": command.title,
                     "content": chunk.content,
-                    "organizationId": str(command.organization_id),
+                    # organization은 선택값(조직 미소속 개인 자료는 없음). 검색 권한 판정엔 쓰지 않고 metadata로만 둔다.
+                    "organizationId": (
+                        str(command.organization_id)
+                        if command.organization_id is not None
+                        else None
+                    ),
                     "ownerUserId": str(command.owner_user_id),
                     "allowedUserIds": [
                         str(user_id) for user_id in command.access_scope.user_ids
