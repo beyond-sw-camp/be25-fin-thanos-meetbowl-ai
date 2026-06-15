@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     rabbitmq_minutes_generate_queue: str = "ai.minutes.generate"
     rabbitmq_minutes_regenerate_queue: str = "ai.minutes.regenerate"
     rabbitmq_minutes_generated_routing_key: str = "minutes.generated"
+    rabbitmq_document_index_queue: str = "ai.document.index"
     rabbitmq_max_retries: int = 3
     llm_provider: str = "gemini"
     gemini_api_key: str | None = None
