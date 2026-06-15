@@ -61,7 +61,10 @@ class DocumentIndexRequestedPayload(UtcDatetimeModel):
     organization_id: UUID | None = None
     owner_user_id: UUID
     title: str = Field(min_length=1)
-    content: str = Field(min_length=1)
+    # 텍스트 자료는 content를, 드라이브 파일은 storage_key+content_type을 보낸다(둘 중 하나 필수).
+    content: str | None = None
+    storage_key: str | None = None
+    content_type: str | None = None
     metadata: DocumentMetadata = Field(default_factory=DocumentMetadata)
     access_scope: AccessScope
 

@@ -4,13 +4,7 @@ from google import genai
 from google.genai import types
 
 from app.core.errors import ProviderUnavailableError
-
-# 이미지/스캔 PDF에서 원문 텍스트만 그대로 뽑도록 지시한다. 요약·해설을 막아 색인 품질을 지킨다.
-_EXTRACTION_PROMPT = (
-    "이 문서(이미지 또는 PDF)에 있는 모든 텍스트를 읽어, 보이는 순서대로 그대로 추출해줘. "
-    "한국어와 영어를 모두 정확히 인식하고, 설명·요약·번역 없이 추출한 텍스트만 출력해. "
-    "텍스트가 전혀 없으면 빈 문자열을 반환해."
-)
+from app.prompts.extraction import DOCUMENT_EXTRACTION_PROMPT
 
 
 class GeminiFileExtractor:
@@ -34,7 +28,7 @@ class GeminiFileExtractor:
                 model=self._model_name,
                 contents=[
                     types.Part.from_bytes(data=content, mime_type=mime_type),
-                    _EXTRACTION_PROMPT,
+                    DOCUMENT_EXTRACTION_PROMPT,
                 ],
             )
         except ProviderUnavailableError:

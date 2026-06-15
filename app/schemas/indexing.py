@@ -54,7 +54,10 @@ class IndexDocumentRequest(ApiModel):
     organization_id: UUID | None = None
     owner_user_id: UUID
     title: str = Field(min_length=1)
-    content: str = Field(min_length=1)
+    # 텍스트 자료는 content를, 드라이브 파일은 storage_key를 보낸다(둘 중 하나는 있어야 함).
+    content: str | None = None
+    storage_key: str | None = None
+    content_type: str | None = None
     metadata: DocumentMetadata = Field(default_factory=DocumentMetadata)
     access_scope: AccessScope
 
@@ -65,7 +68,10 @@ class IndexDocumentCommand(UtcDatetimeModel):
     organization_id: UUID | None = None
     owner_user_id: UUID
     title: str = Field(min_length=1)
-    content: str = Field(min_length=1)
+    # 텍스트 자료는 content를, 드라이브 파일은 storage_key+content_type을 채워 S3에서 추출한다.
+    content: str | None = None
+    storage_key: str | None = None
+    content_type: str | None = None
     access_scope: AccessScope
     metadata: DocumentMetadata = Field(default_factory=DocumentMetadata)
     created_at: datetime

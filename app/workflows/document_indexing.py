@@ -4,6 +4,8 @@ from uuid import NAMESPACE_URL, uuid5
 from app.core.errors import AiError
 from app.pipelines.chunking import split_document_into_chunks
 from app.ports.embedding import EmbeddingPort, EmbeddingRequest
+from app.ports.extraction import FileExtractionRequest, FileTextExtractorPort
+from app.ports.file_storage import FileStoragePort
 from app.ports.vector_store import ReplaceDocumentRequest, VectorPoint, VectorStorePort
 from app.schemas.indexing import DocumentIndexingResult, IndexDocumentCommand
 
@@ -18,6 +20,8 @@ class DocumentIndexingWorkflow:
         chunk_size: int,
         chunk_overlap: int,
         chunk_strategy_version: str,
+        file_storage_port: FileStoragePort | None = None,
+        file_text_extractor: FileTextExtractorPort | None = None,
     ) -> None:
         self._embedding_port = embedding_port
         self._vector_store_port = vector_store_port
@@ -25,9 +29,33 @@ class DocumentIndexingWorkflow:
         self._chunk_size = chunk_size
         self._chunk_overlap = chunk_overlap
         self._chunk_strategy_version = chunk_strategy_version
+        self._file_storage_port = file_storage_port
+        self._file_text_extractor = file_text_extractor
+
+    async def _resolve_content(self, command: IndexDocumentCommand) -> str:
+        """텍스트 자료는 content를 그대로, 드라이브 파일은 S3에서 받아 추출한 텍스트를 쓴다."""
+        if command.content and command.content.strip():
+            return command.content.strip()
+        if command.storage_key:
+            if self._file_storage_port is None or self._file_text_extractor is None:
+                raise AiError(
+                    "AI_DOCUMENT_INDEX_FAILED",
+                    "파일 색인을 위한 저장소/추출기가 구성되지 않았습니다.",
+                    status_code=500,
+                )
+            data = await self._file_storage_port.download(command.storage_key)
+            extraction = await self._file_text_extractor.extract(
+                FileExtractionRequest(
+                    content=data,
+                    content_type=command.content_type or "",
+                    filename=command.title,
+                )
+            )
+            return extraction.text.strip()
+        return ""
 
     async def execute(self, command: IndexDocumentCommand) -> DocumentIndexingResult:
-        content = command.content.strip()
+        content = await self._resolve_content(command)
         if not content:
             raise AiError(
                 "AI_INVALID_EVENT",
