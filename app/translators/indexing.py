@@ -12,8 +12,6 @@ def index_request_to_command(request: IndexDocumentRequest) -> IndexDocumentComm
         owner_user_id=request.owner_user_id,
         title=request.title,
         content=request.content,
-        storage_key=request.storage_key,
-        content_type=request.content_type,
         access_scope=request.access_scope,
         metadata=request.metadata,
         created_at=datetime.now(timezone.utc),

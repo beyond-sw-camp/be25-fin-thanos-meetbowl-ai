@@ -37,21 +37,23 @@ class DocumentIndexingWorkflow:
         await self._vector_store_port.delete_document(document_id)
 
     async def _resolve_content(self, command: IndexDocumentCommand) -> str:
-        """텍스트 자료는 content를 그대로, 드라이브 파일은 S3에서 받아 추출한 텍스트를 쓴다."""
+        """텍스트 자료는 content를 그대로, 파일 자료는 metadata.storage_key로 S3에서 받아 추출한 텍스트를 쓴다."""
         if command.content and command.content.strip():
             return command.content.strip()
-        if command.storage_key:
+        # 파일 위치/타입은 문서 전용 metadata에 담겨 온다(BE가 storageKey/contentType을 metadata로 보냄).
+        storage_key = command.metadata.storage_key
+        if storage_key:
             if self._file_storage_port is None or self._file_text_extractor is None:
                 raise AiError(
                     "AI_DOCUMENT_INDEX_FAILED",
                     "파일 색인을 위한 저장소/추출기가 구성되지 않았습니다.",
                     status_code=500,
                 )
-            data = await self._file_storage_port.download(command.storage_key)
+            data = await self._file_storage_port.download(storage_key)
             extraction = await self._file_text_extractor.extract(
                 FileExtractionRequest(
                     content=data,
-                    content_type=command.content_type or "",
+                    content_type=command.metadata.content_type or "",
                     filename=command.title,
                 )
             )

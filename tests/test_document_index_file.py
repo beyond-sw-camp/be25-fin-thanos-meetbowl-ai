@@ -6,7 +6,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from app.pipelines.file_text_extraction import FileTextExtractor
-from app.schemas.indexing import AccessScope, IndexDocumentCommand
+from app.schemas.indexing import AccessScope, DocumentMetadata, IndexDocumentCommand
 from app.workflows.document_indexing import DocumentIndexingWorkflow
 
 FIXTURES = Path(__file__).parent / "fixtures" / "drive"
@@ -57,8 +57,9 @@ def test_drive_pdf_is_downloaded_from_s3_and_extracted() -> None:
     data = (FIXTURES / "sample1_weekly_sync_minutes.pdf").read_bytes()
     storage = FakeStorage(data)
     command = _command(
-        storage_key="personal-drive/u/1",
-        content_type="application/pdf",
+        metadata=DocumentMetadata(
+            storage_key="personal-drive/u/1", content_type="application/pdf"
+        ),
         title="weekly.pdf",
     )
 
