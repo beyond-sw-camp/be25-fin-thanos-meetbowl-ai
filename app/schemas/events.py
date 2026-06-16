@@ -57,12 +57,20 @@ class MinutesGeneratedPayload(UtcDatetimeModel):
 class DocumentIndexRequestedPayload(UtcDatetimeModel):
     document_id: UUID
     document_type: str = Field(min_length=1)
-    organization_id: UUID
+    # 개인 자료는 조직 미소속 사용자도 색인 대상이므로 organization은 선택값이다.
+    organization_id: UUID | None = None
     owner_user_id: UUID
     title: str = Field(min_length=1)
-    content: str = Field(min_length=1)
+    # 텍스트 자료는 content를, 파일 자료는 metadata.storage_key+content_type을 보낸다(둘 중 하나 필수).
+    content: str | None = None
     metadata: DocumentMetadata = Field(default_factory=DocumentMetadata)
     access_scope: AccessScope
+
+
+class DocumentIndexRemovedPayload(UtcDatetimeModel):
+    """문서가 삭제되어 색인에서 제거해야 함을 알리는 이벤트 payload."""
+
+    document_id: UUID
 
 
 class FeedbackSegmentCreatedPayload(UtcDatetimeModel):

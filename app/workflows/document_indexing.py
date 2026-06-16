@@ -4,6 +4,8 @@ from uuid import NAMESPACE_URL, uuid5
 from app.core.errors import AiError
 from app.pipelines.chunking import split_document_into_chunks
 from app.ports.embedding import EmbeddingPort, EmbeddingRequest
+from app.ports.extraction import FileExtractionRequest, FileTextExtractorPort
+from app.ports.file_storage import FileStoragePort
 from app.ports.vector_store import ReplaceDocumentRequest, VectorPoint, VectorStorePort
 from app.schemas.indexing import DocumentIndexingResult, IndexDocumentCommand
 
@@ -18,6 +20,8 @@ class DocumentIndexingWorkflow:
         chunk_size: int,
         chunk_overlap: int,
         chunk_strategy_version: str,
+        file_storage_port: FileStoragePort | None = None,
+        file_text_extractor: FileTextExtractorPort | None = None,
     ) -> None:
         self._embedding_port = embedding_port
         self._vector_store_port = vector_store_port
@@ -25,9 +29,39 @@ class DocumentIndexingWorkflow:
         self._chunk_size = chunk_size
         self._chunk_overlap = chunk_overlap
         self._chunk_strategy_version = chunk_strategy_version
+        self._file_storage_port = file_storage_port
+        self._file_text_extractor = file_text_extractor
+
+    async def remove_document(self, document_id: str) -> None:
+        """문서 삭제 이벤트를 받아 해당 문서의 색인을 Qdrant에서 제거한다(검색에서 빠지게 한다)."""
+        await self._vector_store_port.delete_document(document_id)
+
+    async def _resolve_content(self, command: IndexDocumentCommand) -> str:
+        """텍스트 자료는 content를 그대로, 파일 자료는 metadata.storage_key로 S3에서 받아 추출한 텍스트를 쓴다."""
+        if command.content and command.content.strip():
+            return command.content.strip()
+        # 파일 위치/타입은 문서 전용 metadata에 담겨 온다(BE가 storageKey/contentType을 metadata로 보냄).
+        storage_key = command.metadata.storage_key
+        if storage_key:
+            if self._file_storage_port is None or self._file_text_extractor is None:
+                raise AiError(
+                    "AI_DOCUMENT_INDEX_FAILED",
+                    "파일 색인을 위한 저장소/추출기가 구성되지 않았습니다.",
+                    status_code=500,
+                )
+            data = await self._file_storage_port.download(storage_key)
+            extraction = await self._file_text_extractor.extract(
+                FileExtractionRequest(
+                    content=data,
+                    content_type=command.metadata.content_type or "",
+                    filename=command.title,
+                )
+            )
+            return extraction.text.strip()
+        return ""
 
     async def execute(self, command: IndexDocumentCommand) -> DocumentIndexingResult:
-        content = command.content.strip()
+        content = await self._resolve_content(command)
         if not content:
             raise AiError(
                 "AI_INVALID_EVENT",
@@ -91,7 +125,12 @@ class DocumentIndexingWorkflow:
                     "chunkStrategyVersion": self._chunk_strategy_version,
                     "title": command.title,
                     "content": chunk.content,
-                    "organizationId": str(command.organization_id),
+                    # organization은 선택값(조직 미소속 개인 자료는 없음). 검색 권한 판정엔 쓰지 않고 metadata로만 둔다.
+                    "organizationId": (
+                        str(command.organization_id)
+                        if command.organization_id is not None
+                        else None
+                    ),
                     "ownerUserId": str(command.owner_user_id),
                     "allowedUserIds": [
                         str(user_id) for user_id in command.access_scope.user_ids

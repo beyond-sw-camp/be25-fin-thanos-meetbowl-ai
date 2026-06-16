@@ -30,6 +30,11 @@ class QdrantVectorStore:
         await self._delete_document_points(request.document_id)
         await self._upsert_points(request)
 
+    async def delete_document(self, document_id: str) -> None:
+        # 문서가 삭제되면 챗봇 검색에 다시 나오지 않도록 해당 문서의 모든 chunk 포인트를 제거한다.
+        # collection이 아직 없을 수도 있으므로(첫 색인 전 삭제 등) 없으면 조용히 통과한다.
+        await self._delete_document_points(document_id)
+
     async def aclose(self) -> None:
         if self._owns_client:
             await self._client.aclose()

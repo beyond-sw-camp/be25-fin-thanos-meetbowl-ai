@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     rabbitmq_minutes_generate_queue: str = "ai.minutes.generate"
     rabbitmq_minutes_regenerate_queue: str = "ai.minutes.regenerate"
     rabbitmq_document_index_queue: str = "ai.index.document"
+    rabbitmq_document_index_removed_queue: str = "ai.index.document.removed"
     rabbitmq_minutes_generated_routing_key: str = "minutes.generated"
     rabbitmq_max_retries: int = 3
     redis_feedback_enabled: bool = False
@@ -46,6 +47,14 @@ class Settings(BaseSettings):
     document_chunk_size: int = 1200
     document_chunk_overlap: int = 150
     document_chunk_strategy_version: str = "paragraph-v1"
+    # 드라이브 파일(이미지/PDF) 텍스트 추출에 쓰는 Gemini 멀티모달 모델.
+    document_extraction_model: str = "gemini-2.5-flash"
+    # S3(드라이브 파일 저장소). 로컬은 LocalStack 엔드포인트, 운영은 None(실제 AWS).
+    s3_endpoint: str | None = None
+    s3_bucket: str = "meetbowl-files"
+    aws_region: str = "ap-northeast-2"
+    aws_access_key_id: str | None = None
+    aws_secret_access_key: str | None = None
     query_embedding_model_profile: str = "query-embedding"
     query_embedding_provider: str = "openai"
     query_embedding_model: str = "text-embedding-3-large"

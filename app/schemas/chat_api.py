@@ -20,7 +20,8 @@ class BeChatRequest(ApiModel):
     request_id: UUID
     correlation_id: UUID
     user_id: UUID
-    organization_id: UUID
+    # 검색 권한은 소유자/워크스페이스로만 판정하므로 조직 미소속 사용자(organization 없음)도 질의할 수 있다.
+    organization_id: UUID | None = None
     question: str = Field(min_length=1, max_length=20_000)
     message_history: list[BeChatMessageRequest] = Field(default_factory=list, max_length=20)
     shared_workspace_ids: list[UUID] = Field(default_factory=list)

@@ -9,9 +9,12 @@ from app.providers.fake_chat import FakeChatProvider
 from app.providers.fake_context_loader import FakeMinutesContextLoader
 from app.providers.fake_embedding import FakeEmbeddingProvider
 from app.providers.fake_generation import FakeStructuredGenerationProvider
+from app.pipelines.file_text_extraction import FileTextExtractor
 from app.providers.gemini_embedding import GeminiEmbeddingProvider
+from app.providers.gemini_extraction import GeminiFileExtractor
 from app.providers.gemini_generation import GeminiStructuredGenerationProvider
 from app.providers.openai_embedding import OpenAIEmbeddingProvider
+from app.providers.s3_file_storage import S3FileStorage
 from app.providers.structured_generation_router import (
     ProfileRoutingStructuredGenerationProvider,
 )
@@ -70,6 +73,20 @@ def build_container(settings: Settings) -> Container:
             chunk_size=settings.document_chunk_size,
             chunk_overlap=settings.document_chunk_overlap,
             chunk_strategy_version=settings.document_chunk_strategy_version,
+            # 드라이브 파일(이미지/PDF)은 S3에서 받아 텍스트를 추출한 뒤 색인한다.
+            file_storage_port=S3FileStorage(
+                bucket=settings.s3_bucket,
+                region=settings.aws_region,
+                endpoint_url=settings.s3_endpoint,
+                access_key_id=settings.aws_access_key_id,
+                secret_access_key=settings.aws_secret_access_key,
+            ),
+            file_text_extractor=FileTextExtractor(
+                gemini_extractor=GeminiFileExtractor(
+                    api_key=settings.gemini_api_key,
+                    model_name=settings.document_extraction_model,
+                )
+            ),
         ),
         chat_workflow=ChatWorkflow(
             FakeChatProvider(
