@@ -106,6 +106,7 @@ class DocumentIndexingWorkflow:
 
         # 같은 문서가 다시 들어와도 같은 chunk index와 전략 버전이면 같은 point id가 만들어진다.
         # 이벤트 중복 소비나 재색인 시 Qdrant upsert가 멱등하게 동작하도록 UUIDv5를 사용한다.
+        source_type = _chat_source_type(command.document_type)
         points = [
             VectorPoint(
                 point_id=str(
@@ -119,7 +120,8 @@ class DocumentIndexingWorkflow:
                 ),
                 vector=vector,
                 payload={
-                    "sourceType": command.document_type,
+                    # 색인 요청 계약의 MEETING_MINUTES는 챗봇 출처 계약에서 MINUTES로 노출한다.
+                    "sourceType": source_type,
                     "sourceId": str(command.document_id),
                     "chunkIndex": chunk.chunk_index,
                     "chunkStrategyVersion": self._chunk_strategy_version,
@@ -167,3 +169,10 @@ class DocumentIndexingWorkflow:
             embedding_model=embedding_result.model_name,
             indexed_at=datetime.now(timezone.utc),
         )
+
+
+def _chat_source_type(document_type: str) -> str:
+    """색인 문서 유형을 챗봇 citation에서 사용하는 자료 유형으로 변환한다."""
+    if document_type == "MEETING_MINUTES":
+        return "MINUTES"
+    return document_type

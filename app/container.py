@@ -2,13 +2,14 @@ from dataclasses import dataclass
 
 from app.core.config import Settings
 from app.core.model_profiles import EmbeddingModelProfile, GenerationModelProfile
-from app.ports.embedding import EmbeddingPort
+from app.ports.embedding import EmbeddingPort, EmbeddingRequest
 from app.ports.generation import StructuredGenerationPort
 from app.providers.embedding_router import ProfileRoutingEmbeddingProvider
 from app.providers.fake_chat import FakeChatProvider
 from app.providers.fake_context_loader import FakeMinutesContextLoader
 from app.providers.fake_embedding import FakeEmbeddingProvider
 from app.providers.fake_generation import FakeStructuredGenerationProvider
+from app.providers.fake_reranker import FakeReranker
 from app.pipelines.file_text_extraction import FileTextExtractor
 from app.providers.gemini_embedding import GeminiEmbeddingProvider
 from app.providers.gemini_extraction import GeminiFileExtractor
@@ -19,6 +20,7 @@ from app.providers.structured_generation_router import (
     ProfileRoutingStructuredGenerationProvider,
 )
 from app.rag.qdrant_feedback import QdrantMeetingFeedbackRetriever
+from app.rag.qdrant_chat import QdrantChatRetriever
 from app.rag.qdrant_vector_store import QdrantVectorStore
 from app.workflows.chat import ChatWorkflow
 from app.workflows.document_indexing import DocumentIndexingWorkflow
@@ -58,6 +60,21 @@ def build_container(settings: Settings) -> Container:
         qdrant_collection=settings.qdrant_collection,
         candidate_limit=settings.feedback_candidate_limit,
     )
+    chat_provider_kwargs = {}
+    if settings.fake_chat_rag_enabled:
+        # fake 챗봇 모드는 외부 LLM 없이 색인·권한 필터·검색 연결성을 검증하기 위한 경로다.
+        chat_provider_kwargs = {
+            "embedding_provider": _ProfileEmbeddingProviderAdapter(
+                embedding_port=embedding_port,
+                model_profile=settings.query_embedding_model_profile,
+            ),
+            "retriever": QdrantChatRetriever(
+                qdrant_url=settings.qdrant_url,
+                qdrant_collection=settings.qdrant_collection,
+            ),
+            "reranker": FakeReranker(),
+            "top_n": settings.rerank_top_n,
+        }
 
     return Container(
         minutes_workflow=MinutesGenerationWorkflow(
@@ -92,6 +109,7 @@ def build_container(settings: Settings) -> Container:
             FakeChatProvider(
                 model_name=settings.fake_chat_model_name,
                 prompt_version=settings.chat_prompt_version,
+                **chat_provider_kwargs,
             )
         ),
         meeting_feedback_workflow=MeetingFeedbackWorkflow(
@@ -103,6 +121,20 @@ def build_container(settings: Settings) -> Container:
         ),
         qdrant_vector_store=qdrant_vector_store,
     )
+
+
+class _ProfileEmbeddingProviderAdapter:
+    """챗봇 검색용 단건 임베딩 요청을 profile 기반 EmbeddingPort 호출로 변환한다."""
+
+    def __init__(self, *, embedding_port: EmbeddingPort, model_profile: str) -> None:
+        self._embedding_port = embedding_port
+        self._model_profile = model_profile
+
+    async def embed(self, text: str) -> list[float]:
+        result = await self._embedding_port.embed(
+            EmbeddingRequest(texts=[text], model_profile=self._model_profile)
+        )
+        return result.embeddings[0]
 
 
 def _build_structured_generation_provider(
