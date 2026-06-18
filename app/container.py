@@ -1,7 +1,11 @@
 from dataclasses import dataclass
 
+from pydantic_ai.models.google import GoogleModel
+from pydantic_ai.providers.google import GoogleProvider
+
 from app.core.config import Settings
 from app.core.model_profiles import EmbeddingModelProfile, GenerationModelProfile
+from app.ports.chat_provider import ChatProvider
 from app.ports.embedding import EmbeddingPort, EmbeddingRequest
 from app.ports.generation import StructuredGenerationPort
 from app.providers.embedding_router import ProfileRoutingEmbeddingProvider
@@ -14,7 +18,9 @@ from app.pipelines.file_text_extraction import FileTextExtractor
 from app.providers.gemini_embedding import GeminiEmbeddingProvider
 from app.providers.gemini_extraction import GeminiFileExtractor
 from app.providers.gemini_generation import GeminiStructuredGenerationProvider
+from app.providers.gemini_reranker import GeminiReranker
 from app.providers.openai_embedding import OpenAIEmbeddingProvider
+from app.providers.pydantic_ai_chat import PydanticAiChatProvider
 from app.providers.s3_file_storage import S3FileStorage
 from app.providers.structured_generation_router import (
     ProfileRoutingStructuredGenerationProvider,
@@ -60,22 +66,6 @@ def build_container(settings: Settings) -> Container:
         qdrant_collection=settings.qdrant_collection,
         candidate_limit=settings.feedback_candidate_limit,
     )
-    chat_provider_kwargs = {}
-    if settings.fake_chat_rag_enabled:
-        # fake 챗봇 모드는 외부 LLM 없이 색인·권한 필터·검색 연결성을 검증하기 위한 경로다.
-        chat_provider_kwargs = {
-            "embedding_provider": _ProfileEmbeddingProviderAdapter(
-                embedding_port=embedding_port,
-                model_profile=settings.query_embedding_model_profile,
-            ),
-            "retriever": QdrantChatRetriever(
-                qdrant_url=settings.qdrant_url,
-                qdrant_collection=settings.qdrant_collection,
-            ),
-            "reranker": FakeReranker(),
-            "top_n": settings.rerank_top_n,
-        }
-
     return Container(
         minutes_workflow=MinutesGenerationWorkflow(
             context_loader=FakeMinutesContextLoader(),
@@ -105,13 +95,7 @@ def build_container(settings: Settings) -> Container:
                 )
             ),
         ),
-        chat_workflow=ChatWorkflow(
-            FakeChatProvider(
-                model_name=settings.fake_chat_model_name,
-                prompt_version=settings.chat_prompt_version,
-                **chat_provider_kwargs,
-            )
-        ),
+        chat_workflow=ChatWorkflow(_build_chat_provider(settings, embedding_port)),
         meeting_feedback_workflow=MeetingFeedbackWorkflow(
             embedding_port=embedding_port,
             retriever=feedback_retriever,
@@ -135,6 +119,57 @@ class _ProfileEmbeddingProviderAdapter:
             EmbeddingRequest(texts=[text], model_profile=self._model_profile)
         )
         return result.embeddings[0]
+
+
+def _build_chat_provider(
+    settings: Settings, embedding_port: EmbeddingPort
+) -> ChatProvider:
+    if settings.chatbot_provider == "gemini":
+        return PydanticAiChatProvider(
+            model=GoogleModel(
+                settings.chatbot_model,
+                provider=GoogleProvider(api_key=settings.gemini_api_key),
+            ),
+            embedding_provider=_ProfileEmbeddingProviderAdapter(
+                embedding_port=embedding_port,
+                model_profile=settings.query_embedding_model_profile,
+            ),
+            retriever=QdrantChatRetriever(
+                qdrant_url=settings.qdrant_url,
+                qdrant_collection=settings.qdrant_collection,
+            ),
+            reranker=GeminiReranker(
+                api_key=settings.gemini_api_key,
+                model_name=settings.chatbot_model,
+                score_threshold=settings.chat_score_threshold,
+            ),
+            model_name=settings.chatbot_model,
+            prompt_version=settings.chat_prompt_version,
+            temperature=settings.chatbot_temperature,
+            candidate_pool=settings.rerank_candidate_pool,
+            top_n=settings.rerank_top_n,
+        )
+
+    chat_provider_kwargs: dict = {}
+    if settings.fake_chat_rag_enabled:
+        # fake 챗봇 모드는 외부 LLM 없이 색인·권한 필터·검색 연결성을 검증하기 위한 경로다.
+        chat_provider_kwargs = {
+            "embedding_provider": _ProfileEmbeddingProviderAdapter(
+                embedding_port=embedding_port,
+                model_profile=settings.query_embedding_model_profile,
+            ),
+            "retriever": QdrantChatRetriever(
+                qdrant_url=settings.qdrant_url,
+                qdrant_collection=settings.qdrant_collection,
+            ),
+            "reranker": FakeReranker(score_threshold=settings.chat_score_threshold),
+            "top_n": settings.rerank_top_n,
+        }
+    return FakeChatProvider(
+        model_name=settings.fake_chat_model_name,
+        prompt_version=settings.chat_prompt_version,
+        **chat_provider_kwargs,
+    )
 
 
 def _build_structured_generation_provider(

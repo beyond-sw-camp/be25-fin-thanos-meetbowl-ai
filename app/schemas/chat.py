@@ -63,3 +63,5 @@ class ChatResult(ApiModel):
 
 class GeneratedChatAnswer(ApiModel):
     answer: str = Field(min_length=1, max_length=20_000)
+    # 답변에 실제로 인용한 자료의 [번호]만 담는다. 검색됐지만 쓰지 않은 자료는 출처로 노출하지 않는다.
+    cited_indices: list[int] = Field(default_factory=list)
