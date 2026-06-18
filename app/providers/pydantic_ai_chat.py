@@ -67,6 +67,8 @@ class PydanticAiChatProvider:
         top_n: int = 10,
         max_retries: int = 2,
         retry_backoff_seconds: float = 0.5,
+        document_max_chars: int = 16000,
+        thinking_budget: int = 0,
     ) -> None:
         self._embedding_provider = embedding_provider
         self._retriever = retriever
@@ -77,12 +79,17 @@ class PydanticAiChatProvider:
         self._top_n = top_n
         self._max_retries = max_retries
         self._retry_backoff_seconds = retry_backoff_seconds
+        self._document_max_chars = document_max_chars
         self._agent: Agent[ChatDeps, GeneratedChatAnswer] = Agent(
             model,
             deps_type=ChatDeps,
             output_type=GeneratedChatAnswer,
             system_prompt=CHAT_SYSTEM_PROMPT,
-            model_settings={"temperature": temperature},
+            # 사고(thinking) 예산을 0으로 두면 호출당 지연이 크게 준다(RAG Q&A엔 보통 불필요).
+            model_settings={
+                "temperature": temperature,
+                "google_thinking_config": {"thinking_budget": thinking_budget},
+            },
         )
 
         @self._agent.system_prompt
@@ -162,6 +169,27 @@ class PydanticAiChatProvider:
                 source_types=source_types,
             )
             return f"조건에 맞는 자료는 총 {count}건입니다."
+
+        @self._agent.tool
+        async def get_document(ctx: RunContext[ChatDeps], citation_number: int) -> str:
+            """특정 문서의 '전체 본문'을 가져온다(긴 문서 통째 요약·정밀 분석용).
+
+            검색 일부 조각이 아니라 문서 전체가 필요할 때 사용한다. citation_number는 앞서
+            search/list 결과로 제시된 [번호]이며, 그 자료의 본문 전체를 반환한다. 받은 본문을
+            바탕으로 요약·분석해 답하라.
+            """
+            sources = ctx.deps.retrieved_sources
+            if not 1 <= citation_number <= len(sources):
+                return "그 번호에 해당하는 자료가 없습니다. 먼저 search/list로 자료를 찾으세요."
+            source = sources[citation_number - 1]
+            text = await ctx.deps.retriever.get_document(
+                command=ctx.deps.command,
+                resource_id=str(source.resource_id),
+                max_chars=self._document_max_chars,
+            )
+            if not text:
+                return "해당 문서의 본문을 찾지 못했습니다."
+            return f"[{citation_number}] {source.title} 전체 본문:\n{text}"
 
     async def answer(self, command: ChatCommand) -> ChatResult:
         """질문과 직전 대화를 Agent에 전달하고 검증된 구조화 답변을 반환한다."""

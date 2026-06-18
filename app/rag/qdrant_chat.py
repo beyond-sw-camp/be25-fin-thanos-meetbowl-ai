@@ -151,6 +151,45 @@ class QdrantChatRetriever:
             if self._http_client is None and "client" in locals():
                 await client.aclose()
 
+    async def get_document(
+        self, *, command: ChatCommand, resource_id: str, max_chars: int
+    ) -> str:
+        """권한 범위 내에서 한 문서의 모든 청크를 모아 본문 전체를 반환한다(전체 요약용).
+
+        벡터 없이 documentId/sourceId로 scroll해 chunkIndex 순으로 이어 붙이고 max_chars로 상한을 둔다.
+        권한 밖이거나 본문이 없으면 빈 문자열을 반환한다.
+        """
+        # 검색과 동일한 권한 필터에 더해, 지정한 문서의 청크만 추리는 조건을 추가한다.
+        access_filter = build_chat_access_filter(command)
+        access_filter["must"].append(
+            {
+                "should": [
+                    {"key": "documentId", "match": {"value": str(resource_id)}},
+                    {"key": "sourceId", "match": {"value": str(resource_id)}},
+                ]
+            }
+        )
+        body = {
+            "filter": access_filter,
+            "limit": _SCROLL_FETCH_LIMIT,
+            "with_payload": True,
+            "with_vector": False,
+        }
+        try:
+            client = self._http_client or httpx.AsyncClient(timeout=10.0)
+            response = await client.post(
+                f"{self._qdrant_url}/collections/{self._qdrant_collection}/points/scroll",
+                json=body,
+            )
+            response.raise_for_status()
+            points = response.json().get("result", {}).get("points", [])
+        except Exception as exc:
+            raise ProviderUnavailableError("Qdrant 본문 조회에 실패했습니다.") from exc
+        finally:
+            if self._http_client is None and "client" in locals():
+                await client.aclose()
+        return _join_document_chunks(points, max_chars=max_chars)
+
     def _to_sources(self, points: list[dict[str, Any]]) -> list[ChatSource]:
         """Qdrant 검색 결과(point)를 챗봇 출처(ChatSource) 모델로 변환한다."""
         sources: list[ChatSource] = []
@@ -209,6 +248,24 @@ class QdrantChatRetriever:
             )
         except (KeyError, TypeError, ValueError, ValidationError):
             return None
+
+
+def _join_document_chunks(points: list[dict[str, Any]], *, max_chars: int) -> str:
+    """문서 청크들을 chunkIndex 순으로 이어 붙이고 max_chars로 자른다(토큰 폭주 방지)."""
+
+    def order(point: dict[str, Any]) -> int:
+        try:
+            return int((point.get("payload") or {}).get("chunkIndex", 0))
+        except (TypeError, ValueError):
+            return 0
+
+    parts: list[str] = []
+    for point in sorted(points, key=order):
+        payload = point.get("payload") or {}
+        text = payload.get("content") or payload.get("snippet")
+        if text:
+            parts.append(str(text))
+    return "\n".join(parts).strip()[:max_chars]
 
 
 def _parse_day_bound(value: Any, *, end: bool) -> datetime | None:

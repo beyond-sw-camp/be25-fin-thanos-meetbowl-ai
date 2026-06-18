@@ -36,6 +36,19 @@ def _point(document_id: str, title: str, created_at: str, chunk: int = 0) -> dic
     }
 
 
+def _chunk(document_id: str, content: str, chunk_index: int) -> dict:
+    return {
+        "id": str(uuid4()),
+        "payload": {
+            "sourceType": "PERSONAL_MEMO",
+            "documentId": document_id,
+            "title": "긴 메모",
+            "content": content,
+            "chunkIndex": chunk_index,
+        },
+    }
+
+
 def _retriever(points: list[dict], capture: dict | None = None) -> QdrantChatRetriever:
     def handler(request: httpx.Request) -> httpx.Response:
         if capture is not None:
@@ -47,6 +60,46 @@ def _retriever(points: list[dict], capture: dict | None = None) -> QdrantChatRet
     return QdrantChatRetriever(
         qdrant_url="http://q", qdrant_collection="c", http_client=client
     )
+
+
+def test_get_document_joins_chunks_in_index_order() -> None:
+    doc = str(uuid4())
+    # 일부러 순서를 섞어 chunkIndex로 정렬되는지 확인
+    points = [
+        _chunk(doc, "셋째 조각", 2),
+        _chunk(doc, "첫째 조각", 0),
+        _chunk(doc, "둘째 조각", 1),
+    ]
+    retriever = _retriever(points)
+
+    text = asyncio.run(
+        retriever.get_document(command=_command(), resource_id=doc, max_chars=1000)
+    )
+
+    assert text == "첫째 조각\n둘째 조각\n셋째 조각"
+
+
+def test_get_document_respects_max_chars() -> None:
+    doc = str(uuid4())
+    retriever = _retriever([_chunk(doc, "가나다라마바사", 0)])
+
+    text = asyncio.run(
+        retriever.get_document(command=_command(), resource_id=doc, max_chars=3)
+    )
+
+    assert text == "가나다"
+
+
+def test_get_document_returns_empty_when_no_chunks() -> None:
+    retriever = _retriever([])
+
+    text = asyncio.run(
+        retriever.get_document(
+            command=_command(), resource_id=str(uuid4()), max_chars=1000
+        )
+    )
+
+    assert text == ""
 
 
 def test_filters_by_created_after_and_sorts_newest_first() -> None:
