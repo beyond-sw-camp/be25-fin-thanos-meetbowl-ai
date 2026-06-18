@@ -29,25 +29,36 @@ class GeminiReranker:
     """
 
     def __init__(
-        self, *, api_key: str | None, model_name: str, client: Any | None = None
+        self,
+        *,
+        api_key: str | None,
+        model_name: str,
+        client: Any | None = None,
+        score_threshold: float = 0.0,
     ) -> None:
         self._api_key = api_key
         self._model_name = model_name
         self._client = client
+        # 관련도가 이 값 미만인 후보는 버린다. 0.0이면 무근거 차단 비활성(전부 통과).
+        self._score_threshold = score_threshold
 
     async def rerank(
         self, *, query: str, sources: list[ChatSource], top_n: int
     ) -> list[ChatSource]:
-        """Gemini 관련도 점수로 재정렬해 상위 top_n개를 반환한다(실패 시 원순서 유지)."""
+        """Gemini 관련도(0~1)를 점수로 매겨 재정렬하고, 임계값 미만은 버린 뒤 상위 top_n개를 반환한다.
+
+        채점이 실패하면 무근거 차단을 적용하지 않고 원래 순서를 유지한다(검색을 막지 않기 위해).
+        """
         if len(sources) <= 1:
             return sources[:top_n]
         try:
             result = await self._score(query, sources)
-            ordered = self._apply_ranking(result, sources)
-            return ordered[:top_n]
         except Exception:
             # 운영 중 reranker 오류가 검색 자체를 막지 않도록 융합 순서로 되돌린다.
             return sources[:top_n]
+        scored = self._apply_scores(result, sources)
+        kept = [source for source in scored if source.score >= self._score_threshold]
+        return kept[:top_n]
 
     async def _score(self, query: str, sources: list[ChatSource]) -> _RankingResult:
         prompt = self._build_prompt(query, sources)
@@ -76,20 +87,26 @@ class GeminiReranker:
             f"문서:\n{candidates}"
         )
 
-    def _apply_ranking(
+    def _apply_scores(
         self, result: _RankingResult, sources: list[ChatSource]
     ) -> list[ChatSource]:
-        ordered: list[ChatSource] = []
-        seen: set[int] = set()
-        for item in sorted(result.items, key=lambda candidate: candidate.score, reverse=True):
-            if 0 <= item.index < len(sources) and item.index not in seen:
-                ordered.append(sources[item.index])
-                seen.add(item.index)
-        # 모델이 누락한 후보는 원래(융합) 순서대로 뒤에 붙인다.
-        for index, source in enumerate(sources):
-            if index not in seen:
-                ordered.append(source)
-        return ordered
+        """각 후보에 Gemini 관련도(0~1)를 score로 부여하고 관련도 내림차순으로 정렬한다.
+
+        모델이 채점하지 않은 후보는 관련도 0으로 둬, 임계값 차단에서 자연스럽게 걸러지게 한다.
+        """
+        score_by_index = {
+            item.index: item.score
+            for item in result.items
+            if 0 <= item.index < len(sources)
+        }
+        rescored = [
+            source.model_copy(
+                update={"score": max(0.0, min(1.0, score_by_index.get(index, 0.0)))}
+            )
+            for index, source in enumerate(sources)
+        ]
+        rescored.sort(key=lambda source: source.score, reverse=True)
+        return rescored
 
     def _get_client(self) -> Any:
         if self._client is not None:

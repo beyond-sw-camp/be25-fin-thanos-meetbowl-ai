@@ -73,6 +73,8 @@ class Settings(BaseSettings):
     chunk_overlap_chars: int = 150
     rerank_candidate_pool: int = 30
     rerank_top_n: int = 10
+    # 챗봇 무근거 답변 차단: 리랭크 관련도(0~1)가 이 값 미만이면 출처에서 제외한다(0이면 비활성).
+    chat_score_threshold: float = 0.0
     feedback_window_max_segments: int = 8
     feedback_window_max_seconds: int = 45
     feedback_min_segments: int = 4
