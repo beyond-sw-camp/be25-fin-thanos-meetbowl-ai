@@ -75,6 +75,10 @@ class Settings(BaseSettings):
     rerank_top_n: int = 10
     # 챗봇 무근거 답변 차단: 리랭크 관련도(0~1)가 이 값 미만이면 출처에서 제외한다(0이면 비활성).
     chat_score_threshold: float = 0.0
+    # 문서 전체 요약 시 본문 회수 상한(글자). 거대 문서가 토큰을 폭주시키지 않게 자른다.
+    chat_document_max_chars: int = 16000
+    # Gemini 사고(thinking) 토큰 예산. 0이면 끔 → 호출당 지연 대폭 감소(RAG Q&A엔 보통 불필요).
+    chat_thinking_budget: int = 0
     feedback_window_max_segments: int = 8
     feedback_window_max_seconds: int = 45
     feedback_min_segments: int = 4

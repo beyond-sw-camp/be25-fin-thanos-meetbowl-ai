@@ -35,12 +35,15 @@ class GeminiReranker:
         model_name: str,
         client: Any | None = None,
         score_threshold: float = 0.0,
+        thinking_budget: int = 0,
     ) -> None:
         self._api_key = api_key
         self._model_name = model_name
         self._client = client
         # 관련도가 이 값 미만인 후보는 버린다. 0.0이면 무근거 차단 비활성(전부 통과).
         self._score_threshold = score_threshold
+        # 리랭크는 관련도 점수만 매기면 되므로 사고(thinking)가 불필요 → 0이면 꺼서 지연을 줄인다.
+        self._thinking_budget = thinking_budget
 
     async def rerank(
         self, *, query: str, sources: list[ChatSource], top_n: int
@@ -69,6 +72,7 @@ class GeminiReranker:
                 temperature=0.0,
                 response_mime_type="application/json",
                 response_json_schema=_RankingResult.model_json_schema(by_alias=True),
+                thinking_config=types.ThinkingConfig(thinking_budget=self._thinking_budget),
             ),
         )
         if not response.text:

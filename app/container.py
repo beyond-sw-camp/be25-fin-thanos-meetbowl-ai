@@ -142,12 +142,15 @@ def _build_chat_provider(
                 api_key=settings.gemini_api_key,
                 model_name=settings.chatbot_model,
                 score_threshold=settings.chat_score_threshold,
+                thinking_budget=settings.chat_thinking_budget,
             ),
             model_name=settings.chatbot_model,
             prompt_version=settings.chat_prompt_version,
             temperature=settings.chatbot_temperature,
             candidate_pool=settings.rerank_candidate_pool,
             top_n=settings.rerank_top_n,
+            document_max_chars=settings.chat_document_max_chars,
+            thinking_budget=settings.chat_thinking_budget,
         )
 
     chat_provider_kwargs: dict = {}
