@@ -198,9 +198,11 @@ class RabbitRuntime:
         self._connection: aio_pika.abc.AbstractRobustConnection | None = None
 
     async def start(self) -> None:
-        self._connection = await aio_pika.connect_robust(self._settings.rabbitmq_url)
+        self._connection = await aio_pika.connect_robust(
+            self._settings.rabbitmq_connection_url()
+        )
         channel = await self._connection.channel()
-        exchange = await channel.get_exchange(self._settings.rabbitmq_exchange)
+        exchange, _ = await self._declare_topology(channel)
         publisher = AioPikaEventPublisher(
             exchange, self._settings.rabbitmq_minutes_generated_routing_key
         )
@@ -253,3 +255,97 @@ class RabbitRuntime:
     ) -> None:
         queue = await channel.get_queue(queue_name)
         await queue.consume(callback)
+
+    async def _declare_topology(
+        self,
+        channel: aio_pika.abc.AbstractChannel,
+    ) -> tuple[aio_pika.abc.AbstractExchange, aio_pika.abc.AbstractExchange]:
+        exchange = await channel.declare_exchange(
+            self._settings.rabbitmq_exchange,
+            aio_pika.ExchangeType.TOPIC,
+            durable=True,
+        )
+        dlx = await channel.declare_exchange(
+            "meetbowl.dlx",
+            aio_pika.ExchangeType.TOPIC,
+            durable=True,
+        )
+
+        await self._declare_event_queue(
+            channel=channel,
+            exchange=exchange,
+            dlx=dlx,
+            queue_name=self._settings.rabbitmq_minutes_generate_queue,
+            routing_key="meeting.ended",
+            dead_letter_routing_key="dlq.meeting.ended",
+        )
+        await self._declare_event_queue(
+            channel=channel,
+            exchange=exchange,
+            dlx=dlx,
+            queue_name=self._settings.rabbitmq_minutes_regenerate_queue,
+            routing_key="minutes.generation.requested",
+            dead_letter_routing_key="dlq.minutes.generation.requested",
+        )
+        await self._declare_event_queue(
+            channel=channel,
+            exchange=exchange,
+            dlx=dlx,
+            queue_name=self._settings.rabbitmq_document_index_queue,
+            routing_key="document.index.requested",
+            dead_letter_routing_key="dlq.document.index.requested",
+        )
+        await self._declare_event_queue(
+            channel=channel,
+            exchange=exchange,
+            dlx=dlx,
+            queue_name=self._settings.rabbitmq_document_index_removed_queue,
+            routing_key="document.index.removed",
+            dead_letter_routing_key="dlq.document.index.removed",
+        )
+
+        minutes_generated_queue = await channel.declare_queue(
+            "api.minutes.generated",
+            durable=True,
+            arguments={
+                "x-queue-type": "quorum",
+                "x-delivery-limit": 3,
+                "x-dead-letter-exchange": dlx.name,
+                "x-dead-letter-routing-key": "dlq.minutes.generated",
+            },
+        )
+        await minutes_generated_queue.bind(
+            exchange,
+            routing_key=self._settings.rabbitmq_minutes_generated_routing_key,
+        )
+        dlq_minutes_generated = await channel.declare_queue(
+            "dlq.api.minutes.generated",
+            durable=True,
+        )
+        await dlq_minutes_generated.bind(dlx, routing_key="dlq.minutes.generated")
+
+        return exchange, dlx
+
+    async def _declare_event_queue(
+        self,
+        *,
+        channel: aio_pika.abc.AbstractChannel,
+        exchange: aio_pika.abc.AbstractExchange,
+        dlx: aio_pika.abc.AbstractExchange,
+        queue_name: str,
+        routing_key: str,
+        dead_letter_routing_key: str,
+    ) -> None:
+        queue = await channel.declare_queue(
+            queue_name,
+            durable=True,
+            arguments={
+                "x-dead-letter-exchange": dlx.name,
+                "x-dead-letter-routing-key": dead_letter_routing_key,
+            },
+        )
+        await queue.bind(exchange, routing_key=routing_key)
+
+        dlq_name = f"dlq.{queue_name}"
+        dead_letter_queue = await channel.declare_queue(dlq_name, durable=True)
+        await dead_letter_queue.bind(dlx, routing_key=dead_letter_routing_key)
