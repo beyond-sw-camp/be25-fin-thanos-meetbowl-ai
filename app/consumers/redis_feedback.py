@@ -3,6 +3,7 @@ import logging
 from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from collections.abc import Callable
 from typing import Protocol
 from uuid import UUID, uuid4
 
@@ -13,8 +14,11 @@ from app.schemas.events import (
     FeedbackSegmentCreatedPayload,
     MeetingFeedbackGeneratedPayload,
 )
-from app.schemas.feedback import FeedbackTranscriptSegment, MeetingFeedbackCommand
-from app.workflows.meeting_feedback import MeetingFeedbackWorkflow
+from app.schemas.feedback import (
+    FeedbackTranscriptSegment,
+    MeetingFeedbackCommand,
+    MeetingFeedbackResult,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -28,9 +32,18 @@ class FeedbackResultPublisher(Protocol):
     ) -> None: ...
 
 
+class MeetingFeedbackExecutor(Protocol):
+    async def execute(
+        self, command: MeetingFeedbackCommand
+    ) -> MeetingFeedbackResult | None: ...
+
+
 @dataclass
 class MeetingWindowState:
     segments: deque[FeedbackTranscriptSegment]
+    segment_ids: set[UUID]
+    last_sequence: int | None
+    last_activity_at: datetime
     last_query_ended_at_ms: int | None = None
     last_query_fingerprint: str | None = None
 
@@ -39,7 +52,7 @@ class FeedbackEventProcessor:
     def __init__(
         self,
         *,
-        workflow: MeetingFeedbackWorkflow,
+        workflow: MeetingFeedbackExecutor,
         publisher: FeedbackResultPublisher | None,
         max_segments: int,
         max_window_seconds: int,
@@ -47,6 +60,8 @@ class FeedbackEventProcessor:
         min_window_chars: int,
         trigger_interval_seconds: int,
         cooldown_seconds: int,
+        state_ttl_seconds: int,
+        clock: Callable[[], datetime] | None = None,
     ) -> None:
         self._workflow = workflow
         self._publisher = publisher
@@ -56,8 +71,12 @@ class FeedbackEventProcessor:
         self._min_window_chars = min_window_chars
         self._trigger_interval_ms = trigger_interval_seconds * 1000
         self._cooldown_seconds = cooldown_seconds
-        self._windows: dict[UUID, MeetingWindowState] = {}
-        self._last_published_at: dict[tuple[str, str, tuple[str, ...]], datetime] = {}
+        self._state_ttl = timedelta(seconds=state_ttl_seconds)
+        self._clock = clock or (lambda: datetime.now(timezone.utc))
+        self._windows: dict[tuple[UUID, UUID], MeetingWindowState] = {}
+        self._last_published_at: dict[
+            tuple[str, str, str, tuple[str, ...]], datetime
+        ] = {}
 
     def set_publisher(self, publisher: FeedbackResultPublisher) -> None:
         self._publisher = publisher
@@ -71,22 +90,40 @@ class FeedbackEventProcessor:
         except ValidationError:
             return
 
+        if not payload.is_final:
+            return
+
+        now = self._clock()
+        self.cleanup_expired_state(now)
+        window_key = (payload.meeting_id, payload.session_id)
+
         state = self._windows.setdefault(
-            payload.meeting_id,
-            MeetingWindowState(segments=deque(maxlen=self._max_segments)),
+            window_key,
+            MeetingWindowState(
+                segments=deque(maxlen=self._max_segments),
+                segment_ids=set(),
+                last_sequence=None,
+                last_activity_at=now,
+            ),
         )
-        state.segments.append(
-            FeedbackTranscriptSegment(
-                segment_id=payload.segment_id,
-                sequence=payload.sequence,
-                language=payload.language,
-                text=payload.text,
-                is_final=payload.is_final,
-                started_at_ms=payload.started_at_ms,
-                ended_at_ms=payload.ended_at_ms,
-            )
+        if payload.segment_id in state.segment_ids:
+            return
+        if state.last_sequence is not None and payload.sequence <= state.last_sequence:
+            return
+
+        segment = FeedbackTranscriptSegment(
+            segment_id=payload.segment_id,
+            sequence=payload.sequence,
+            language=payload.language,
+            text=payload.text,
+            is_final=True,
+            started_at_ms=payload.started_at_ms,
+            ended_at_ms=payload.ended_at_ms,
         )
-        _trim_expired_segments(state.segments, payload.ended_at_ms, self._max_window_seconds)
+        _append_segment(state, segment, self._max_segments)
+        state.last_sequence = payload.sequence
+        state.last_activity_at = now
+        _trim_expired_segments(state, payload.ended_at_ms, self._max_window_seconds)
         if len(state.segments) < self._min_segments:
             return
         if sum(len(segment.text) for segment in state.segments) < self._min_window_chars:
@@ -119,6 +156,7 @@ class FeedbackEventProcessor:
             return
         dedupe_key = (
             str(result.meeting_id),
+            str(payload.session_id),
             result.feedback_type,
             tuple(str(source.minutes_id) for source in result.sources),
         )
@@ -141,6 +179,25 @@ class FeedbackEventProcessor:
             correlation_id=envelope.correlation_id,
         )
         self._last_published_at[dedupe_key] = result.generated_at
+
+    def cleanup_expired_state(self, now: datetime | None = None) -> None:
+        now = now or self._clock()
+        expired_keys = [
+            key
+            for key, state in self._windows.items()
+            if now - state.last_activity_at >= self._state_ttl
+        ]
+        for key in expired_keys:
+            self._windows.pop(key, None)
+
+        dedupe_cutoff = now - max(self._state_ttl, timedelta(seconds=self._cooldown_seconds))
+        expired_dedupe_keys = [
+            key
+            for key, published_at in self._last_published_at.items()
+            if published_at < dedupe_cutoff
+        ]
+        for key in expired_dedupe_keys:
+            self._last_published_at.pop(key, None)
 
 
 class RedisFeedbackRuntime(FeedbackResultPublisher):
@@ -208,6 +265,7 @@ class RedisFeedbackRuntime(FeedbackResultPublisher):
         known_streams: set[str] = set()
         while True:
             try:
+                self._processor.cleanup_expired_state()
                 discovered_streams = await self._discover_streams()
                 for stream in discovered_streams - known_streams:
                     await self._ensure_group(stream)
@@ -261,12 +319,25 @@ class RedisFeedbackRuntime(FeedbackResultPublisher):
                 raise
 
 
+def _append_segment(
+    state: MeetingWindowState,
+    segment: FeedbackTranscriptSegment,
+    max_segments: int,
+) -> None:
+    if len(state.segments) >= max_segments:
+        evicted = state.segments.popleft()
+        state.segment_ids.discard(evicted.segment_id)
+    state.segments.append(segment)
+    state.segment_ids.add(segment.segment_id)
+
+
 def _trim_expired_segments(
-    segments: deque[FeedbackTranscriptSegment], latest_ended_at_ms: int, max_window_seconds: int
+    state: MeetingWindowState, latest_ended_at_ms: int, max_window_seconds: int
 ) -> None:
     min_started_at_ms = latest_ended_at_ms - (max_window_seconds * 1000)
-    while segments and segments[0].ended_at_ms < min_started_at_ms:
-        segments.popleft()
+    while state.segments and state.segments[0].ended_at_ms < min_started_at_ms:
+        expired = state.segments.popleft()
+        state.segment_ids.discard(expired.segment_id)
 
 
 def _build_window_fingerprint(segments: deque[FeedbackTranscriptSegment]) -> str:

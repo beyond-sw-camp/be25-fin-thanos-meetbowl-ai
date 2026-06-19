@@ -91,6 +91,7 @@ class Settings(BaseSettings):
     feedback_min_window_chars: int = 40
     feedback_trigger_interval_seconds: int = 15
     feedback_cooldown_seconds: int = 90
+    feedback_state_ttl_seconds: int = 300
     feedback_score_threshold: float = 0.78
     feedback_candidate_limit: int = 3
     feedback_prompt_version: str = "feedback-rule-v1"

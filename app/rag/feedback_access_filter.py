@@ -13,7 +13,8 @@ def build_feedback_access_filter(
         },
         {"key": "sourceType", "match": {"any": ["MEETING_MINUTES", "MINUTES"]}},
     ]
-    for user_id in command.participant_user_ids:
+    participant_user_ids = sorted(set(command.participant_user_ids), key=str)
+    for user_id in participant_user_ids:
         # 현재 회의 참가자 모두가 읽을 수 있는 회의록만 방송형 피드백 근거로 허용한다.
         must.append({"key": "allowedUserIds", "match": {"any": [str(user_id)]}})
     return {
