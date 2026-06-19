@@ -41,10 +41,6 @@ class Settings(BaseSettings):
     chatbot_provider: str = "gemini"
     chatbot_model: str = "gemini-2.5-flash"
     chatbot_temperature: float = 0.2
-    meeting_feedback_model_profile: str = "meeting-feedback"
-    meeting_feedback_provider: str = "gemini"
-    meeting_feedback_model: str = "gemini-2.5-flash"
-    meeting_feedback_temperature: float = 0.2
     document_embedding_model_profile: str = "document-embedding"
     document_embedding_provider: str = "openai"
     document_embedding_model: str = "text-embedding-3-large"
@@ -94,7 +90,6 @@ class Settings(BaseSettings):
     feedback_state_ttl_seconds: int = 300
     feedback_score_threshold: float = 0.78
     feedback_candidate_limit: int = 3
-    feedback_prompt_version: str = "feedback-rule-v1"
 
     @model_validator(mode="after")
     def validate_unique_model_profiles(self) -> "Settings":
@@ -121,12 +116,6 @@ class Settings(BaseSettings):
                 provider=self.chatbot_provider,
                 model_name=self.chatbot_model,
                 temperature=self.chatbot_temperature,
-            ),
-            GenerationModelProfile(
-                name=self.meeting_feedback_model_profile,
-                provider=self.meeting_feedback_provider,
-                model_name=self.meeting_feedback_model,
-                temperature=self.meeting_feedback_temperature,
             ),
         )
 

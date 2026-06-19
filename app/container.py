@@ -100,7 +100,6 @@ def build_container(settings: Settings) -> Container:
             embedding_port=embedding_port,
             retriever=feedback_retriever,
             query_model_profile=settings.query_embedding_model_profile,
-            prompt_version=settings.feedback_prompt_version,
             score_threshold=settings.feedback_score_threshold,
         ),
         qdrant_vector_store=qdrant_vector_store,

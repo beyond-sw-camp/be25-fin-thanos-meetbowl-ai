@@ -1,9 +1,9 @@
 import asyncio
 import logging
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from collections.abc import Callable
 from typing import Protocol
 from uuid import UUID, uuid4
 
@@ -156,7 +156,7 @@ class FeedbackEventProcessor:
             return
         dedupe_key = (
             str(result.meeting_id),
-            str(payload.session_id),
+            str(result.session_id),
             result.feedback_type,
             tuple(str(source.minutes_id) for source in result.sources),
         )
@@ -166,10 +166,15 @@ class FeedbackEventProcessor:
         ) < timedelta(seconds=self._cooldown_seconds):
             return
         payload = MeetingFeedbackGeneratedPayload(
+            feedback_id=result.feedback_id,
             meeting_id=result.meeting_id,
+            session_id=result.session_id,
             feedback_type=result.feedback_type,
             message=result.message,
             sources=result.sources,
+            audience_user_ids=result.audience_user_ids,
+            from_sequence=result.from_sequence,
+            to_sequence=result.to_sequence,
             generated_at=result.generated_at,
         )
         if self._publisher is None:

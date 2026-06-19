@@ -3,8 +3,12 @@ from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
 from app.consumers.redis_feedback import FeedbackEventProcessor
-from app.schemas.events import EventEnvelope
-from app.schemas.feedback import MeetingFeedbackCommand
+from app.schemas.events import EventEnvelope, MeetingFeedbackGeneratedPayload
+from app.schemas.feedback import (
+    FeedbackCandidate,
+    MeetingFeedbackCommand,
+    MeetingFeedbackResult,
+)
 
 
 class RecordingWorkflow:
@@ -14,6 +18,51 @@ class RecordingWorkflow:
     async def execute(self, command: MeetingFeedbackCommand):
         self.commands.append(command)
         return None
+
+
+class ResultWorkflow:
+    def __init__(self) -> None:
+        self.commands: list[MeetingFeedbackCommand] = []
+        self.source_minutes_id = uuid4()
+
+    async def execute(
+        self, command: MeetingFeedbackCommand
+    ) -> MeetingFeedbackResult:
+        self.commands.append(command)
+        return MeetingFeedbackResult(
+            feedback_id=uuid4(),
+            meeting_id=command.meeting_id,
+            session_id=command.session_id,
+            feedback_type="DUPLICATE_DISCUSSION",
+            message="이전에 유사한 논의가 있었습니다.",
+            sources=[
+                FeedbackCandidate(
+                    minutes_id=self.source_minutes_id,
+                    meeting_id=uuid4(),
+                    title="과거 회의록",
+                    meeting_date="2026-06-10",
+                    snippet="결제 승인 정책을 검토했습니다.",
+                    score=0.9,
+                )
+            ],
+            audience_user_ids=command.participant_user_ids,
+            from_sequence=command.transcript_window[0].sequence,
+            to_sequence=command.transcript_window[-1].sequence,
+            generated_at=datetime(2026, 6, 19, tzinfo=timezone.utc),
+        )
+
+
+class RecordingPublisher:
+    def __init__(self) -> None:
+        self.published: list[tuple[MeetingFeedbackGeneratedPayload, UUID]] = []
+
+    async def publish(
+        self,
+        *,
+        result_payload: MeetingFeedbackGeneratedPayload,
+        correlation_id: UUID,
+    ) -> None:
+        self.published.append((result_payload, correlation_id))
 
 
 class MutableClock:
@@ -28,15 +77,16 @@ class MutableClock:
 
 
 def _processor(
-    workflow: RecordingWorkflow,
+    workflow,
     *,
+    publisher: RecordingPublisher | None = None,
     min_segments: int = 1,
     state_ttl_seconds: int = 300,
     clock: MutableClock | None = None,
 ) -> FeedbackEventProcessor:
     return FeedbackEventProcessor(
         workflow=workflow,
-        publisher=None,
+        publisher=publisher,
         max_segments=8,
         max_window_seconds=45,
         min_segments=min_segments,
@@ -186,3 +236,69 @@ def test_expired_session_windows_are_removed() -> None:
     processor.cleanup_expired_state()
 
     assert processor._windows == {}
+
+
+def test_none_result_does_not_publish_feedback() -> None:
+    workflow = RecordingWorkflow()
+    publisher = RecordingPublisher()
+    processor = _processor(workflow, publisher=publisher)
+
+    asyncio.run(
+        processor.process_raw(
+            _event(meeting_id=uuid4(), session_id=uuid4(), sequence=0)
+        )
+    )
+
+    assert len(workflow.commands) == 1
+    assert publisher.published == []
+
+
+def test_success_result_publishes_delivery_scope() -> None:
+    workflow = ResultWorkflow()
+    publisher = RecordingPublisher()
+    processor = _processor(workflow, publisher=publisher)
+    meeting_id = uuid4()
+    session_id = uuid4()
+    participant_user_id = uuid4()
+
+    asyncio.run(
+        processor.process_raw(
+            _event(
+                meeting_id=meeting_id,
+                session_id=session_id,
+                sequence=7,
+                participant_user_ids=[participant_user_id],
+            )
+        )
+    )
+
+    assert len(publisher.published) == 1
+    payload, _ = publisher.published[0]
+    assert payload.meeting_id == meeting_id
+    assert payload.session_id == session_id
+    assert payload.audience_user_ids == [participant_user_id]
+    assert payload.from_sequence == 7
+    assert payload.to_sequence == 7
+
+
+def test_cooldown_suppresses_same_feedback_source_in_a_session() -> None:
+    workflow = ResultWorkflow()
+    publisher = RecordingPublisher()
+    clock = MutableClock()
+    processor = _processor(workflow, publisher=publisher, clock=clock)
+    meeting_id = uuid4()
+    session_id = uuid4()
+
+    async def run() -> None:
+        await processor.process_raw(
+            _event(meeting_id=meeting_id, session_id=session_id, sequence=0)
+        )
+        clock.advance(1)
+        await processor.process_raw(
+            _event(meeting_id=meeting_id, session_id=session_id, sequence=1)
+        )
+
+    asyncio.run(run())
+
+    assert len(workflow.commands) == 2
+    assert len(publisher.published) == 1

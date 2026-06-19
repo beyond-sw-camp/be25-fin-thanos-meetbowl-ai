@@ -2,10 +2,10 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from app.schemas.base import UtcDatetimeModel
-from app.schemas.feedback import FeedbackCandidate
+from app.schemas.feedback import FeedbackCandidate, FeedbackType
 from app.schemas.indexing import AccessScope, DocumentMetadata
 from app.schemas.minutes import ActionItem, AgendaItem
 from app.schemas.tiptap import TiptapDocument
@@ -88,8 +88,19 @@ class FeedbackSegmentCreatedPayload(UtcDatetimeModel):
 
 
 class MeetingFeedbackGeneratedPayload(UtcDatetimeModel):
+    feedback_id: UUID
     meeting_id: UUID
-    feedback_type: str = Field(min_length=1, max_length=50)
+    session_id: UUID
+    feedback_type: FeedbackType
     message: str = Field(min_length=1, max_length=500)
-    sources: list[FeedbackCandidate] = Field(default_factory=list)
+    sources: list[FeedbackCandidate] = Field(default_factory=list, min_length=1)
+    audience_user_ids: list[UUID] = Field(default_factory=list, min_length=1)
+    from_sequence: int = Field(ge=0)
+    to_sequence: int = Field(ge=0)
     generated_at: datetime
+
+    @model_validator(mode="after")
+    def validate_sequence_range(self) -> "MeetingFeedbackGeneratedPayload":
+        if self.to_sequence < self.from_sequence:
+            raise ValueError("toSequence must be greater than or equal to fromSequence")
+        return self
