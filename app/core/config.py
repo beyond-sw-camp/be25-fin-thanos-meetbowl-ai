@@ -1,4 +1,5 @@
 from functools import lru_cache
+from urllib.parse import quote
 
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -10,7 +11,12 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     rabbitmq_enabled: bool = False
-    rabbitmq_url: str = "amqp://meetbowl:local-rabbitmq-password@localhost:5672/"
+    rabbitmq_url: str | None = None
+    rabbitmq_host: str = "localhost"
+    rabbitmq_port: int = 5672
+    rabbitmq_user: str = "meetbowl"
+    rabbitmq_password: str = "local-rabbitmq-password"
+    rabbitmq_vhost: str = "/"
     rabbitmq_exchange: str = "meetbowl.topic"
     rabbitmq_minutes_generate_queue: str = "ai.minutes.generate"
     rabbitmq_minutes_regenerate_queue: str = "ai.minutes.regenerate"
@@ -135,6 +141,20 @@ class Settings(BaseSettings):
                 provider=self.query_embedding_provider,
                 model_name=self.query_embedding_model,
             ),
+        )
+
+    def rabbitmq_connection_url(self) -> str:
+        if self.rabbitmq_url:
+            return self.rabbitmq_url
+        user = quote(self.rabbitmq_user, safe="")
+        password = quote(self.rabbitmq_password, safe="")
+        if self.rabbitmq_vhost == "/":
+            vhost = ""
+        else:
+            vhost = quote(self.rabbitmq_vhost.lstrip("/"), safe="")
+        return (
+            f"amqp://{user}:{password}@"
+            f"{self.rabbitmq_host}:{self.rabbitmq_port}/{vhost}"
         )
 
 
