@@ -12,7 +12,8 @@ from app.schemas.feedback import (
     MeetingFeedbackResult,
 )
 
-logger = logging.getLogger(__name__)
+# Uvicorn 기본 로깅 설정에서도 실시간 피드백 처리 결과가 INFO 수준으로 보이게 한다.
+logger = logging.getLogger("uvicorn.error")
 
 
 class MeetingFeedbackRetriever(Protocol):
@@ -50,6 +51,17 @@ class MeetingFeedbackWorkflow:
                 texts=[query],
                 model_profile=self._query_model_profile,
             )
+        )
+        # 회의 원문은 로그에 남기지 않고 모델/차원만 기록해 실제 query embedding 호출을 관측한다.
+        logger.info(
+            "meeting feedback query embedded: meeting_id=%s session_id=%s "
+            "model=%s dimensions=%s segments=%s chars=%s",
+            command.meeting_id,
+            command.session_id,
+            embedding_result.model_name,
+            embedding_result.dimensions,
+            len(command.transcript_window),
+            len(query),
         )
         candidates = await self._retriever.search(
             vector=embedding_result.embeddings[0],

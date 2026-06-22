@@ -1,7 +1,7 @@
 from functools import lru_cache
 from urllib.parse import quote
 
-from pydantic import model_validator
+from pydantic import PositiveInt, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.core.model_profiles import EmbeddingModelProfile, GenerationModelProfile
@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     document_embedding_model_profile: str = "document-embedding"
     document_embedding_provider: str = "openai"
     document_embedding_model: str = "text-embedding-3-large"
+    document_embedding_dimensions: PositiveInt = 1536
     document_chunk_size: int = 1200
     document_chunk_overlap: int = 150
     document_chunk_strategy_version: str = "paragraph-v1"
@@ -58,6 +59,7 @@ class Settings(BaseSettings):
     query_embedding_model_profile: str = "query-embedding"
     query_embedding_provider: str = "openai"
     query_embedding_model: str = "text-embedding-3-large"
+    query_embedding_dimensions: PositiveInt = 1536
     gemini_model_name: str = "gemini-2.5-flash"
     gemini_temperature: float = 0.2
     fake_model_name: str = "fake-minutes-model"
@@ -99,6 +101,19 @@ class Settings(BaseSettings):
         embedding_names = [profile.name for profile in embedding_profiles]
         if len(embedding_names) != len(set(embedding_names)):
             raise ValueError("Embedding model profile names must be unique")
+        document_profile, query_profile = embedding_profiles
+        if (
+            document_profile.provider,
+            document_profile.model_name,
+            document_profile.dimensions,
+        ) != (
+            query_profile.provider,
+            query_profile.model_name,
+            query_profile.dimensions,
+        ):
+            raise ValueError(
+                "Document and query embedding provider/model/dimensions must match"
+            )
         return self
 
     def generation_model_profiles(self) -> tuple[GenerationModelProfile, ...]:
@@ -123,11 +138,13 @@ class Settings(BaseSettings):
                 name=self.document_embedding_model_profile,
                 provider=self.document_embedding_provider,
                 model_name=self.document_embedding_model,
+                dimensions=self.document_embedding_dimensions,
             ),
             EmbeddingModelProfile(
                 name=self.query_embedding_model_profile,
                 provider=self.query_embedding_provider,
                 model_name=self.query_embedding_model,
+                dimensions=self.query_embedding_dimensions,
             ),
         )
 

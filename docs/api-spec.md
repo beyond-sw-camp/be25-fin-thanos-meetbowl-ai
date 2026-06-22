@@ -368,6 +368,10 @@ REST API는 테스트, 관리성 수동 호출, 장애 대응용 재처리 경�
 `ownerUserId`, `workspaceId`, `sharedWorkspaceIds`, `sourceType`, `documentId`)에 keyword
 payload 인덱스를 생성해 대용량에서 필터링 속도를 확보한다.
 
+기본 OpenAI 검색 공간은 `text-embedding-3-large`의 `dimensions=1536` 설정을 사용한다.
+문서 색인과 질의 embedding은 provider, 모델, 차원이 모두 같아야 하며, 이 값이 바뀌면
+기존 컬렉션을 재사용하지 않고 새 Qdrant 컬렉션에 전체 재색인한다.
+
 개발 환경에서 `LLM_PROVIDER=fake`, `FAKE_CHAT_RAG_ENABLED=true`를 사용하면 실제
 Qdrant 색인·검색과 권한 filter를 외부 Gemini 호출 없이 검증할 수 있다. 이 모드는
 운영 품질의 의미 embedding 또는 자연어 답변 품질을 검증하는 용도가 아니다.

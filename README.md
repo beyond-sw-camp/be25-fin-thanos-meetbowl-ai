@@ -28,7 +28,7 @@ cp .env.example .env
 
 Set `GEMINI_API_KEY` in `.env`. The default model is `gemini-2.5-flash`.
 For embeddings, set `OPENAI_API_KEY`. The default embedding model is
-`text-embedding-3-large`.
+`text-embedding-3-large`, shortened to 1536 dimensions.
 
 ### API-only mode
 
@@ -116,7 +116,9 @@ Generation models are selected by logical profile. The default profiles are
 model, and temperature settings. They currently default to the same Gemini model.
 Embedding settings are independently defined for `document-embedding` and
 `query-embedding`. The default provider is OpenAI, and the default model is
-`text-embedding-3-large`.
+`text-embedding-3-large` with 1536 dimensions. Document and query provider, model,
+and dimensions must match. Changing this search space requires a new Qdrant collection
+and full document reindexing.
 
 Document indexing uses `QDRANT_URL`, `QDRANT_COLLECTION`, `DOCUMENT_CHUNK_SIZE`,
 `DOCUMENT_CHUNK_OVERLAP`, and `DOCUMENT_CHUNK_STRATEGY_VERSION`. The default chunk
