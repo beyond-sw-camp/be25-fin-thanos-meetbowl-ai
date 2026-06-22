@@ -58,6 +58,32 @@ local Qdrant integration test without a Gemini key, run:
 RUN_RAG_E2E=true uv run pytest -q tests/test_rag_e2e.py -s
 ```
 
+### Manual realtime feedback check
+
+To inspect only the AI feedback result without BE, STT, LiveKit, or MariaDB, start the
+API with Redis feedback enabled and deterministic embeddings in a dedicated collection:
+
+```bash
+REDIS_FEEDBACK_ENABLED=true \
+DOCUMENT_EMBEDDING_PROVIDER=fake \
+QUERY_EMBEDDING_PROVIDER=fake \
+DOCUMENT_EMBEDDING_MODEL=fake-embedding \
+QUERY_EMBEDDING_MODEL=fake-embedding \
+QDRANT_COLLECTION=meetbowl-feedback-manual \
+uv run fastapi dev
+```
+
+In another terminal, index fixture minutes, publish four finalized transcript events,
+and wait for the generated Redis event:
+
+```bash
+uv run python scripts/manual_feedback_flow.py
+```
+
+The script generates isolated UUIDs, puts all fixture participants in `allowedUserIds`,
+uses a different historical meeting ID, and prints the complete
+`meeting.feedback.generated` envelope. Qdrant and Redis must already be running.
+
 This test uses a dedicated temporary collection and verifies backup mail, personal memo,
 personal drive file, shared workspace file version, meeting minutes, and workspace access
 denial. Set `GEMINI_API_KEY` and `LLM_PROVIDER=gemini` to verify production embeddings and

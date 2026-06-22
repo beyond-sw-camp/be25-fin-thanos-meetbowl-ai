@@ -44,8 +44,6 @@ class Settings(BaseSettings):
     document_embedding_model_profile: str = "document-embedding"
     document_embedding_provider: str = "openai"
     document_embedding_model: str = "text-embedding-3-large"
-    qdrant_url: str = "http://localhost:6333"
-    qdrant_collection: str = "meetbowl_documents_v1"
     document_chunk_size: int = 1200
     document_chunk_overlap: int = 150
     document_chunk_strategy_version: str = "paragraph-v1"

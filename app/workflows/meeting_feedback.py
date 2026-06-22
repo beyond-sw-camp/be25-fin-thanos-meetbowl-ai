@@ -1,3 +1,4 @@
+import logging
 import re
 from datetime import datetime, timezone
 from typing import Protocol
@@ -10,6 +11,8 @@ from app.schemas.feedback import (
     MeetingFeedbackCommand,
     MeetingFeedbackResult,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class MeetingFeedbackRetriever(Protocol):
@@ -53,6 +56,12 @@ class MeetingFeedbackWorkflow:
             query=query,
             command=command,
         )
+        if not candidates:
+            logger.info(
+                "meeting feedback skipped: no candidates meeting_id=%s session_id=%s",
+                command.meeting_id,
+                command.session_id,
+            )
         qualified_candidates = [
             (candidate, feedback_type)
             for candidate in candidates
@@ -61,6 +70,14 @@ class MeetingFeedbackWorkflow:
             is not None
         ]
         if not qualified_candidates:
+            logger.info(
+                "meeting feedback skipped: gate rejected candidates meeting_id=%s "
+                "session_id=%s scores=%s threshold=%s",
+                command.meeting_id,
+                command.session_id,
+                [round(candidate.score, 4) for candidate in candidates],
+                self._score_threshold,
+            )
             return None
         top_candidate, feedback_type = qualified_candidates[0]
         sources = [candidate for candidate, _ in qualified_candidates[:3]]
