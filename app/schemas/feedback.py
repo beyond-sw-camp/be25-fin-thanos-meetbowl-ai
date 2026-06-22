@@ -51,10 +51,19 @@ class MeetingFeedbackCommand(ApiModel):
 
 
 class MeetingFeedbackResult(UtcDatetimeModel):
+    feedback_id: UUID
     meeting_id: UUID
+    session_id: UUID
     feedback_type: FeedbackType
     message: str = Field(min_length=1, max_length=500)
     sources: list[FeedbackCandidate] = Field(default_factory=list, min_length=1)
-    model: str = Field(min_length=1, max_length=100)
-    prompt_version: str = Field(min_length=1, max_length=50)
+    audience_user_ids: list[UUID] = Field(default_factory=list, min_length=1)
+    from_sequence: int = Field(ge=0)
+    to_sequence: int = Field(ge=0)
     generated_at: datetime
+
+    @model_validator(mode="after")
+    def validate_sequence_range(self) -> "MeetingFeedbackResult":
+        if self.to_sequence < self.from_sequence:
+            raise ValueError("toSequence must be greater than or equal to fromSequence")
+        return self

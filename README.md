@@ -28,7 +28,7 @@ cp .env.example .env
 
 Set `GEMINI_API_KEY` in `.env`. The default model is `gemini-2.5-flash`.
 For embeddings, set `OPENAI_API_KEY`. The default embedding model is
-`text-embedding-3-large`.
+`text-embedding-3-large`, shortened to 1536 dimensions.
 
 ### API-only mode
 
@@ -57,6 +57,32 @@ local Qdrant integration test without a Gemini key, run:
 ```bash
 RUN_RAG_E2E=true uv run pytest -q tests/test_rag_e2e.py -s
 ```
+
+### Manual realtime feedback check
+
+To inspect only the AI feedback result without BE, STT, LiveKit, or MariaDB, start the
+API with Redis feedback enabled and deterministic embeddings in a dedicated collection:
+
+```bash
+REDIS_FEEDBACK_ENABLED=true \
+DOCUMENT_EMBEDDING_PROVIDER=fake \
+QUERY_EMBEDDING_PROVIDER=fake \
+DOCUMENT_EMBEDDING_MODEL=fake-embedding \
+QUERY_EMBEDDING_MODEL=fake-embedding \
+QDRANT_COLLECTION=meetbowl-feedback-manual \
+uv run fastapi dev
+```
+
+In another terminal, index fixture minutes, publish four finalized transcript events,
+and wait for the generated Redis event:
+
+```bash
+uv run python scripts/manual_feedback_flow.py
+```
+
+The script generates isolated UUIDs, puts all fixture participants in `allowedUserIds`,
+uses a different historical meeting ID, and prints the complete
+`meeting.feedback.generated` envelope. Qdrant and Redis must already be running.
 
 This test uses a dedicated temporary collection and verifies backup mail, personal memo,
 personal drive file, shared workspace file version, meeting minutes, and workspace access
@@ -90,7 +116,9 @@ Generation models are selected by logical profile. The default profiles are
 model, and temperature settings. They currently default to the same Gemini model.
 Embedding settings are independently defined for `document-embedding` and
 `query-embedding`. The default provider is OpenAI, and the default model is
-`text-embedding-3-large`.
+`text-embedding-3-large` with 1536 dimensions. Document and query provider, model,
+and dimensions must match. Changing this search space requires a new Qdrant collection
+and full document reindexing.
 
 Document indexing uses `QDRANT_URL`, `QDRANT_COLLECTION`, `DOCUMENT_CHUNK_SIZE`,
 `DOCUMENT_CHUNK_OVERLAP`, and `DOCUMENT_CHUNK_STRATEGY_VERSION`. The default chunk

@@ -1,7 +1,7 @@
 from functools import lru_cache
 from urllib.parse import quote
 
-from pydantic import model_validator
+from pydantic import PositiveInt, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.core.model_profiles import EmbeddingModelProfile, GenerationModelProfile
@@ -41,15 +41,10 @@ class Settings(BaseSettings):
     chatbot_provider: str = "gemini"
     chatbot_model: str = "gemini-2.5-flash"
     chatbot_temperature: float = 0.2
-    meeting_feedback_model_profile: str = "meeting-feedback"
-    meeting_feedback_provider: str = "gemini"
-    meeting_feedback_model: str = "gemini-2.5-flash"
-    meeting_feedback_temperature: float = 0.2
     document_embedding_model_profile: str = "document-embedding"
     document_embedding_provider: str = "openai"
     document_embedding_model: str = "text-embedding-3-large"
-    qdrant_url: str = "http://localhost:6333"
-    qdrant_collection: str = "meetbowl_documents_v1"
+    document_embedding_dimensions: PositiveInt = 1536
     document_chunk_size: int = 1200
     document_chunk_overlap: int = 150
     document_chunk_strategy_version: str = "paragraph-v1"
@@ -64,6 +59,7 @@ class Settings(BaseSettings):
     query_embedding_model_profile: str = "query-embedding"
     query_embedding_provider: str = "openai"
     query_embedding_model: str = "text-embedding-3-large"
+    query_embedding_dimensions: PositiveInt = 1536
     gemini_model_name: str = "gemini-2.5-flash"
     gemini_temperature: float = 0.2
     fake_model_name: str = "fake-minutes-model"
@@ -91,9 +87,9 @@ class Settings(BaseSettings):
     feedback_min_window_chars: int = 40
     feedback_trigger_interval_seconds: int = 15
     feedback_cooldown_seconds: int = 90
+    feedback_state_ttl_seconds: int = 300
     feedback_score_threshold: float = 0.78
     feedback_candidate_limit: int = 3
-    feedback_prompt_version: str = "feedback-rule-v1"
 
     @model_validator(mode="after")
     def validate_unique_model_profiles(self) -> "Settings":
@@ -105,6 +101,19 @@ class Settings(BaseSettings):
         embedding_names = [profile.name for profile in embedding_profiles]
         if len(embedding_names) != len(set(embedding_names)):
             raise ValueError("Embedding model profile names must be unique")
+        document_profile, query_profile = embedding_profiles
+        if (
+            document_profile.provider,
+            document_profile.model_name,
+            document_profile.dimensions,
+        ) != (
+            query_profile.provider,
+            query_profile.model_name,
+            query_profile.dimensions,
+        ):
+            raise ValueError(
+                "Document and query embedding provider/model/dimensions must match"
+            )
         return self
 
     def generation_model_profiles(self) -> tuple[GenerationModelProfile, ...]:
@@ -121,12 +130,6 @@ class Settings(BaseSettings):
                 model_name=self.chatbot_model,
                 temperature=self.chatbot_temperature,
             ),
-            GenerationModelProfile(
-                name=self.meeting_feedback_model_profile,
-                provider=self.meeting_feedback_provider,
-                model_name=self.meeting_feedback_model,
-                temperature=self.meeting_feedback_temperature,
-            ),
         )
 
     def embedding_model_profiles(self) -> tuple[EmbeddingModelProfile, ...]:
@@ -135,11 +138,13 @@ class Settings(BaseSettings):
                 name=self.document_embedding_model_profile,
                 provider=self.document_embedding_provider,
                 model_name=self.document_embedding_model,
+                dimensions=self.document_embedding_dimensions,
             ),
             EmbeddingModelProfile(
                 name=self.query_embedding_model_profile,
                 provider=self.query_embedding_provider,
                 model_name=self.query_embedding_model,
+                dimensions=self.query_embedding_dimensions,
             ),
         )
 

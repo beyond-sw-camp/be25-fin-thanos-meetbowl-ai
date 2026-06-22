@@ -116,7 +116,7 @@ Workflow에서 직접 Qdrant를 호출하지 않는다.
 meeting.ended
 minutes.generation.requested
 document.index.requested
-meeting.feedback.requested
+meeting.feedback.segment.created
 ```
 
 발행:
@@ -127,6 +127,12 @@ meeting.feedback.generated
 ```
 
 임의 이벤트 추가 금지.
+
+실시간 피드백은 `meeting.feedback.segment.created`를 meeting/session별 rolling window로
+구성한 뒤 처리한다. Qdrant `allowedUserIds`에 현재 인증 참가자 전원이 포함된 회의록만
+근거로 사용할 수 있다. 관련도 threshold, 근거 유형, cooldown, 중복 제거 기준을 모두
+통과한 경우에만 `meeting.feedback.generated`를 발행하며, 유사 논의가 없으면 아무 결과
+이벤트도 발행하지 않는다.
 
 ---
 
@@ -147,6 +153,7 @@ meeting.feedback.generated
 
 - 모든 AI 기능은 Workflow 단위로 구현한다.
 - 모든 LLM 응답은 Schema Validation을 수행한다.
+- 실시간 피드백의 실시간 판정 경로에는 LLM을 사용하지 않고 권한 RAG 결과와 결정적 규칙을 사용한다.
 - AI 회의록은 검토자 승인 전까지 초안 상태임을 전제로 생성한다.
 - 챗봇 답변은 가능한 한 출처를 포함한다.
 - 자료에서 확인되지 않는 내용을 단정하지 않는다.

@@ -100,7 +100,6 @@ def build_container(settings: Settings) -> Container:
             embedding_port=embedding_port,
             retriever=feedback_retriever,
             query_model_profile=settings.query_embedding_model_profile,
-            prompt_version=settings.feedback_prompt_version,
             score_threshold=settings.feedback_score_threshold,
         ),
         qdrant_vector_store=qdrant_vector_store,
@@ -204,9 +203,10 @@ def _build_embedding_provider(
             api_key=settings.openai_api_key,
             base_url=settings.openai_base_url,
             model_name=profile.model_name,
+            dimensions=profile.dimensions,
         )
     if profile.provider == "fake":
-        return FakeEmbeddingProvider(profile.model_name)
+        return FakeEmbeddingProvider(profile.model_name, profile.dimensions or 4)
     raise ValueError(
         f"Unsupported embedding provider for profile {profile.name}: {profile.provider}"
     )

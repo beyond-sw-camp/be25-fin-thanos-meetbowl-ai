@@ -198,24 +198,30 @@ StarterKit 호환 JSON이다. 회의 요약은 기본으로 포함하며, 안건
 
 ---
 
-## 6. Real-time Meeting Feedback API
+## 6. Real-time Meeting Feedback Stream
 
-실시간 피드백은 REST보다 Redis Stream 소비 방식이 기본이다.
+실시간 피드백은 REST API가 아니라 Redis Stream으로 처리한다. `meetbowl-ai`는 finalized
+segment 단위 `meeting.feedback.segment.created`를 소비하고 meeting/session별 rolling
+window를 구성한다.
 
-REST API는 테스트/수동 호출/폴백 용도로 둔다.
+현재 인증 참가자 전원이 Qdrant `allowedUserIds`에 포함된 과거 회의록만 검색한다. 권한
+필터를 통과한 후보가 없거나 관련도 threshold, 근거 유형, cooldown 또는 중복 제거 기준을
+통과하지 못하면 결과 이벤트를 발행하지 않는다.
 
-| Method | Endpoint | 설명 | 호출 주체 |
-|---|---|---|---|
-| POST | `/meeting-feedback/analyze` | 현재 발화 기반 실시간 피드백 생성 | meetbowl-stt/meetbowl-be |
-| POST | `/meeting-feedback/remind-decisions` | 이전 결정사항 리마인드 생성 | meetbowl-stt/meetbowl-be |
-| POST | `/meeting-feedback/detect-duplicate` | 중복 논의 감지 | meetbowl-stt/meetbowl-be |
-
-### Response
+### Result Event Payload
 
 ```json
 {
-  "success": true,
-  "data": {
+  "eventId": "uuid",
+  "eventType": "meeting.feedback.generated",
+  "occurredAt": "2026-06-02T01:10:00Z",
+  "producer": "ai-server",
+  "version": 1,
+  "correlationId": "uuid",
+  "payload": {
+    "feedbackId": "uuid",
+    "meetingId": "uuid",
+    "sessionId": "uuid",
     "feedbackType": "DECISION_REMINDER",
     "message": "이 안건은 지난 회의에서 이미 A안으로 결정된 이력이 있습니다.",
     "sources": [
@@ -224,13 +230,15 @@ REST API는 테스트/수동 호출/폴백 용도로 둔다.
         "meetingId": "uuid",
         "title": "지난 회의 제목",
         "meetingDate": "2026-05-20",
-        "snippet": "A안으로 진행하기로 결정"
+        "snippet": "A안으로 진행하기로 결정",
+        "score": 0.91
       }
     ],
-    "model": "llm-model-name",
+    "audienceUserIds": ["uuid"],
+    "fromSequence": 8,
+    "toSequence": 12,
     "generatedAt": "2026-06-02T01:10:00Z"
-  },
-  "message": null
+  }
 }
 ```
 
@@ -360,6 +368,10 @@ REST API는 테스트, 관리성 수동 호출, 장애 대응용 재처리 경�
 `ownerUserId`, `workspaceId`, `sharedWorkspaceIds`, `sourceType`, `documentId`)에 keyword
 payload 인덱스를 생성해 대용량에서 필터링 속도를 확보한다.
 
+기본 OpenAI 검색 공간은 `text-embedding-3-large`의 `dimensions=1536` 설정을 사용한다.
+문서 색인과 질의 embedding은 provider, 모델, 차원이 모두 같아야 하며, 이 값이 바뀌면
+기존 컬렉션을 재사용하지 않고 새 Qdrant 컬렉션에 전체 재색인한다.
+
 개발 환경에서 `LLM_PROVIDER=fake`, `FAKE_CHAT_RAG_ENABLED=true`를 사용하면 실제
 Qdrant 색인·검색과 권한 filter를 외부 Gemini 호출 없이 검증할 수 있다. 이 모드는
 운영 품질의 의미 embedding 또는 자연어 답변 품질을 검증하는 용도가 아니다.
@@ -378,7 +390,7 @@ embedding collection과 vector dimension이 다르므로 Gemini 전용 collectio
 | RabbitMQ `ai.minutes.generate` | `meeting.ended` | 회의 종료 후 회의록 생성 |
 | RabbitMQ `ai.minutes.regenerate` | `minutes.generation.requested` | 회의록 생성/재생성 |
 | RabbitMQ `ai.index.document` | `document.index.requested` | 자료 색인 |
-| Redis Stream | `meeting.feedback.requested` | Final Transcript 기반 실시간 피드백 분석 |
+| Redis Stream | `meeting.feedback.segment.created` | Finalized Transcript segment 기반 실시간 피드백 입력 |
 
 발행:
 

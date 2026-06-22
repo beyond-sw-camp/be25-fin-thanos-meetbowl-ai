@@ -14,3 +14,4 @@ class EmbeddingModelProfile:
     name: str
     provider: str
     model_name: str
+    dimensions: int | None = None

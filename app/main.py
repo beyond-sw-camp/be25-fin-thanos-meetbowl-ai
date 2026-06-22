@@ -43,6 +43,7 @@ def create_app(
                 min_window_chars=resolved_settings.feedback_min_window_chars,
                 trigger_interval_seconds=resolved_settings.feedback_trigger_interval_seconds,
                 cooldown_seconds=resolved_settings.feedback_cooldown_seconds,
+                state_ttl_seconds=resolved_settings.feedback_state_ttl_seconds,
             )
             redis_feedback_runtime = RedisFeedbackRuntime(
                 redis_url=resolved_settings.redis_url,
