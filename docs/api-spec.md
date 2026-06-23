@@ -101,10 +101,10 @@ REST API는 테스트, 관리성 수동 호출, 장애 대응용 재처리 경�
 
 현재 개발 단계의 회의록 생성 파이프라인은 Gemini API의 structured output을 사용한다.
 생성 workflow의 원문 입력 계약은 하나의 긴 `rawTranscript` 문자열이다. RabbitMQ 이벤트
-경로의 회의 정보와 원문은 아직 `FakeMinutesContextLoader`의
-결정적인 개발용 fixture로 구성하며, 운영 적용 전 `meetbowl-be` 내부 context API를
-호출하는 adapter로 교체해야 한다. 향후 원문이 발화 목록으로 확정되면 context adapter에서
-시간순 정렬 및 긴 문자열 결합을 수행한 뒤 기존 workflow에 전달한다. REST
+경로에서는 `meetingId`로 `meetbowl-be`의 시스템 전용
+`GET /api/v1/internal/meetings/{meetingId}/minutes-generation-context`를 호출한다. BE는 저장된
+Final Transcript segment를 sequence 순으로 정렬·결합하고, 회의·검토자·참석자 정보와 함께
+반환한다. REST
 `/minutes/generate` 입력의 참여자와 `rawTranscript`는 동일한 workflow에서 직접 사용한다.
 외부 API 없는 회의록 테스트에는 `MINUTES_SUMMARY_PROVIDER=fake`를 사용할 수 있다.
 

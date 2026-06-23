@@ -17,3 +17,12 @@
 - Qdrant: 기존 3072차원 컬렉션을 재사용하지 않고 `meetbowl-documents-openai-large-1536`을 사용한다.
 - 남은 작업: 과거 회의록 및 검색 대상 문서를 새 컬렉션에 전체 재색인해야 한다.
 - 검증: 전체 테스트 52개 통과. 실제 OpenAI API 호출에서 `text-embedding-3-large`, 1536차원 응답을 확인했다.
+
+## 2026-06-23 실제 Final Transcript 기반 회의록 Context 연동
+
+- 목적: RabbitMQ 회의록 생성 경로가 개발용 고정 원문이 아니라 BE가 저장한 Final Transcript를 사용하도록 한다.
+- 변경 파일: HTTP Minutes Context Loader, container/config wiring, RabbitMQ 멱등성 tracker, 관련 테스트와 문서.
+- 변경 동작: RabbitMQ 이벤트 처리 시 BE 시스템 전용 Context API를 호출하고, REST 직접 생성은 요청에 포함된 Context를 그대로 사용한다.
+- 멱등성: AI 회의록 Consumer의 완료·재시도 상태를 Redis에 7일간 보존한다. 중복 결과가 발행되더라도 BE inbox가 최종 저장을 다시 방어한다.
+- 제외 범위: FE 회의록 편집·승인 연결과 회의록 공유는 변경하지 않았다.
+- 검증: AI 전체 테스트 53개 통과, Python compileall 통과.

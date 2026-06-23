@@ -279,7 +279,8 @@ meetbowl-be
 RabbitMQ
   ↓
 meetbowl-ai consumer
-  ↓ transcript load
+  ↓ BE internal minutes-generation-context 조회
+  ↓ Final Transcript sequence 정렬 결과 로드
   ↓ transcript cleanup
   ↓ agenda/decision/action item extraction
   ↓ minutes draft generation

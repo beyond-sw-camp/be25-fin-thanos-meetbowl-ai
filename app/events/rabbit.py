@@ -3,10 +3,11 @@ from typing import Protocol
 
 import aio_pika
 from pydantic import ValidationError
+from redis.asyncio import Redis
 
 from app.core.config import Settings
 from app.core.errors import AiError
-from app.events.idempotency import InMemoryEventTracker
+from app.events.idempotency import InMemoryEventTracker, RedisEventTracker
 from app.events.mapper import (
     command_from_event,
     generated_event,
@@ -36,7 +37,7 @@ class MinutesEventProcessor:
         *,
         workflow: MinutesGenerationWorkflow,
         publisher: EventPublisher,
-        tracker: InMemoryEventTracker,
+        tracker: RedisEventTracker,
         max_retries: int,
     ) -> None:
         self._workflow = workflow
@@ -51,7 +52,7 @@ class MinutesEventProcessor:
             await message.reject(requeue=False)
             return
 
-        if self._tracker.is_completed(envelope.event_id):
+        if await self._tracker.is_completed(envelope.event_id):
             await message.ack()
             return
 
@@ -59,22 +60,29 @@ class MinutesEventProcessor:
             command = command_from_event(envelope)
             result = await self._workflow.execute(command)
             await self._publisher.publish(
-                generated_event(result=result, correlation_id=envelope.correlation_id)
+                generated_event(
+                    result=result,
+                    correlation_id=envelope.correlation_id,
+                    source_event_id=envelope.event_id,
+                )
             )
         except AiError as exc:
-            if exc.retryable and self._tracker.increment_retry(envelope.event_id) <= self._max_retries:
+            if (
+                exc.retryable
+                and await self._tracker.increment_retry(envelope.event_id) <= self._max_retries
+            ):
                 await message.reject(requeue=True)
             else:
                 await message.reject(requeue=False)
             return
         except Exception:
-            if self._tracker.increment_retry(envelope.event_id) <= self._max_retries:
+            if await self._tracker.increment_retry(envelope.event_id) <= self._max_retries:
                 await message.reject(requeue=True)
             else:
                 await message.reject(requeue=False)
             return
 
-        self._tracker.mark_completed(envelope.event_id)
+        await self._tracker.mark_completed(envelope.event_id)
         await message.ack()
 
 
@@ -196,6 +204,7 @@ class RabbitRuntime:
         self._minutes_workflow = minutes_workflow
         self._document_indexing_workflow = document_indexing_workflow
         self._connection: aio_pika.abc.AbstractRobustConnection | None = None
+        self._idempotency_redis: Redis | None = None
 
     async def start(self) -> None:
         self._connection = await aio_pika.connect_robust(
@@ -206,10 +215,15 @@ class RabbitRuntime:
         publisher = AioPikaEventPublisher(
             exchange, self._settings.rabbitmq_minutes_generated_routing_key
         )
+        self._idempotency_redis = Redis.from_url(self._settings.redis_url)
         minutes_processor = MinutesEventProcessor(
             workflow=self._minutes_workflow,
             publisher=publisher,
-            tracker=InMemoryEventTracker(),
+            tracker=RedisEventTracker(
+                self._idempotency_redis,
+                namespace="meetbowl:ai:minutes-events",
+                ttl_seconds=self._settings.rabbitmq_idempotency_ttl_seconds,
+            ),
             max_retries=self._settings.rabbitmq_max_retries,
         )
         document_index_processor = DocumentIndexEventProcessor(
@@ -246,6 +260,8 @@ class RabbitRuntime:
     async def stop(self) -> None:
         if self._connection is not None:
             await self._connection.close()
+        if self._idempotency_redis is not None:
+            await self._idempotency_redis.aclose()
 
     async def _consume(
         self,
