@@ -2,7 +2,7 @@
 
 from uuid import uuid4
 
-from app.providers.pydantic_ai_chat import _select_cited_sources
+from app.providers.pydantic_ai_chat import _normalize_answer_format, _select_cited_sources
 from app.schemas.chat import ChatSource
 
 
@@ -36,3 +36,21 @@ def test_out_of_range_and_duplicate_indices_are_ignored() -> None:
     selected = _select_cited_sources(accumulated, [2, 2, 5, 0, -1])
 
     assert [s.title for s in selected] == ["B"]
+
+
+def test_html_lists_are_converted_to_readable_plain_text() -> None:
+    answer = _normalize_answer_format(
+        "결론<ul><li>첫 번째</li><li><b>두 번째</b></li></ul><br>끝"
+    )
+
+    assert "<ul>" not in answer
+    assert "- 첫 번째" in answer
+    assert "- 두 번째" in answer
+    assert "\n" in answer
+
+
+def test_long_single_paragraph_is_split_every_three_sentences() -> None:
+    answer = _normalize_answer_format("하나. 둘. 셋. 넷. 다섯. 여섯.")
+
+    paragraphs = answer.split("\n\n")
+    assert paragraphs == ["하나. 둘. 셋.", "넷. 다섯. 여섯."]

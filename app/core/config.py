@@ -39,9 +39,24 @@ class Settings(BaseSettings):
     minutes_summary_model: str = "gemini-2.5-flash"
     minutes_summary_temperature: float = 0.2
     chatbot_model_profile: str = "chatbot"
+    # router = 질의별 분기(기본), single_pass = 검색1회+LLM1회(빠름, 의미검색만), agentic = LLM 툴 루프(느림/비결정적)
+    chatbot_mode: str = "router"
     chatbot_provider: str = "gemini"
     chatbot_model: str = "gemini-2.5-flash"
+    # 기본 모델이 503(과부하)일 때 자동 전환할 대체 모델. 같은 Gemini끼리는 과부하를 공유하므로
+    # provider를 다르게(openai) 두면 Gemini 전체 장애 시에도 다른 벤더로 넘어가 응답을 살린다.
+    chatbot_fallback_provider: str = "gemini"
+    chatbot_fallback_model: str = "gemini-2.5-flash-lite"
     chatbot_temperature: float = 0.2
+    # 검색 전 질의를 한↔영 번역·인명 음역으로 확장해 교차언어 검색을 결정적으로 만든다.
+    query_expansion_enabled: bool = True
+    query_expansion_model_profile: str = "query-expansion"
+    query_expansion_provider: str = "gemini"
+    query_expansion_model: str = "gemini-2.5-flash-lite"
+    # 질의 확장·임베딩(질의만의 함수, 사용자 데이터 무관)을 캐시해 반복 검색의 LLM/임베딩 호출을 없앤다.
+    chat_query_cache_enabled: bool = True
+    chat_query_cache_max_size: int = 512
+    chat_query_cache_ttl_seconds: float = 300.0
     document_embedding_model_profile: str = "document-embedding"
     document_embedding_provider: str = "openai"
     document_embedding_model: str = "text-embedding-3-large"
@@ -71,9 +86,9 @@ class Settings(BaseSettings):
     be_base_url: str = "http://localhost:8080"
     be_context_timeout_seconds: float = 5.0
     qdrant_url: str = "http://localhost:6333"
-    qdrant_collection: str = "meetbowl-documents-gemini"
+    qdrant_collection: str = "meetbowl-documents-openai-large-1536"
     gemini_embedding_model_name: str = "gemini-embedding-001"
-    chat_prompt_version: str = "chat-v2"
+    chat_prompt_version: str = "chat-v9"
     chunk_max_chars: int = 1200
     chunk_overlap_chars: int = 150
     rerank_candidate_pool: int = 30
@@ -82,8 +97,10 @@ class Settings(BaseSettings):
     chat_score_threshold: float = 0.0
     # 문서 전체 요약 시 본문 회수 상한(글자). 거대 문서가 토큰을 폭주시키지 않게 자른다.
     chat_document_max_chars: int = 16000
-    # Gemini 사고(thinking) 토큰 예산. 0이면 끔 → 호출당 지연 대폭 감소(RAG Q&A엔 보통 불필요).
-    chat_thinking_budget: int = 512
+    # Gemini 사고(thinking) 토큰 예산. 256은 멀티홉 정답을 유지하면서 512 대비 지연을 줄인 측정값이다.
+    chat_thinking_budget: int = 256
+    # agentic 툴 루프 모델 호출 상한. 3이 정답률을 지키는 최소선이다(2는 멀티홉 단계 부족으로 붕괴).
+    chat_request_limit: int = 3
     feedback_window_max_segments: int = 8
     feedback_window_max_seconds: int = 45
     feedback_min_segments: int = 4
@@ -132,6 +149,12 @@ class Settings(BaseSettings):
                 provider=self.chatbot_provider,
                 model_name=self.chatbot_model,
                 temperature=self.chatbot_temperature,
+            ),
+            GenerationModelProfile(
+                name=self.query_expansion_model_profile,
+                provider=self.query_expansion_provider,
+                model_name=self.query_expansion_model,
+                temperature=0.0,
             ),
         )
 
