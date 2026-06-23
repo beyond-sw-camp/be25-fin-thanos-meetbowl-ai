@@ -74,7 +74,7 @@ class Settings(BaseSettings):
     qdrant_url: str = "http://localhost:6333"
     qdrant_collection: str = "meetbowl-documents-gemini"
     gemini_embedding_model_name: str = "gemini-embedding-001"
-    chat_prompt_version: str = "chat-v1"
+    chat_prompt_version: str = "chat-v2"
     chunk_max_chars: int = 1200
     chunk_overlap_chars: int = 150
     rerank_candidate_pool: int = 30
@@ -84,7 +84,7 @@ class Settings(BaseSettings):
     # 문서 전체 요약 시 본문 회수 상한(글자). 거대 문서가 토큰을 폭주시키지 않게 자른다.
     chat_document_max_chars: int = 16000
     # Gemini 사고(thinking) 토큰 예산. 0이면 끔 → 호출당 지연 대폭 감소(RAG Q&A엔 보통 불필요).
-    chat_thinking_budget: int = 0
+    chat_thinking_budget: int = 512
     feedback_window_max_segments: int = 8
     feedback_window_max_seconds: int = 45
     feedback_min_segments: int = 4
