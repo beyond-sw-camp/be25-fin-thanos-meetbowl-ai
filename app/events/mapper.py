@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from uuid import UUID, uuid4
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 from pydantic import ValidationError
 
@@ -49,7 +49,7 @@ def command_from_event(envelope: EventEnvelope) -> MinutesGenerationCommand:
 
 
 def generated_event(
-    *, result: MinutesGenerationResult, correlation_id: UUID
+    *, result: MinutesGenerationResult, correlation_id: UUID, source_event_id: UUID
 ) -> EventEnvelope:
     payload = MinutesGeneratedPayload(
         meeting_id=result.meeting_id,
@@ -65,7 +65,8 @@ def generated_event(
         prompt_version=result.prompt_version,
     )
     return EventEnvelope(
-        event_id=uuid4(),
+        # 입력 이벤트가 ACK 전에 재전달되어도 BE inbox가 같은 결과로 식별할 수 있어야 한다.
+        event_id=uuid5(NAMESPACE_URL, f"minutes.generated:{source_event_id}"),
         event_type=MINUTES_GENERATED,
         occurred_at=datetime.now(timezone.utc),
         producer="ai-server",

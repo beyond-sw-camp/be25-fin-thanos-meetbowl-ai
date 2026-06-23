@@ -10,7 +10,7 @@ from app.ports.embedding import EmbeddingPort, EmbeddingRequest
 from app.ports.generation import StructuredGenerationPort
 from app.providers.embedding_router import ProfileRoutingEmbeddingProvider
 from app.providers.fake_chat import FakeChatProvider
-from app.providers.fake_context_loader import FakeMinutesContextLoader
+from app.providers.http_minutes_context_loader import HttpMinutesContextLoader
 from app.providers.fake_embedding import FakeEmbeddingProvider
 from app.providers.fake_generation import FakeStructuredGenerationProvider
 from app.providers.fake_reranker import FakeReranker
@@ -68,7 +68,11 @@ def build_container(settings: Settings) -> Container:
     )
     return Container(
         minutes_workflow=MinutesGenerationWorkflow(
-            context_loader=FakeMinutesContextLoader(),
+            context_loader=HttpMinutesContextLoader(
+                base_url=settings.be_base_url,
+                internal_token=settings.internal_token,
+                timeout_seconds=settings.be_context_timeout_seconds,
+            ),
             structured_generation_port=structured_generation_port,
             model_profile=settings.minutes_model_profile,
             prompt_version=settings.minutes_prompt_version,

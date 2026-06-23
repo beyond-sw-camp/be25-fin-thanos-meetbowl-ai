@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     rabbitmq_document_index_removed_queue: str = "ai.index.document.removed"
     rabbitmq_minutes_generated_routing_key: str = "minutes.generated"
     rabbitmq_max_retries: int = 3
+    rabbitmq_idempotency_ttl_seconds: int = 604800
     redis_feedback_enabled: bool = False
     redis_url: str = "redis://localhost:6379"
     redis_feedback_consumer_group: str = "ai-feedback"
@@ -67,6 +68,8 @@ class Settings(BaseSettings):
     fake_chat_rag_enabled: bool = False
     minutes_prompt_version: str = "minutes-v1"
     internal_token: str = "meetbowl-local-internal-token-32bytes"
+    be_base_url: str = "http://localhost:8080"
+    be_context_timeout_seconds: float = 5.0
     qdrant_url: str = "http://localhost:6333"
     qdrant_collection: str = "meetbowl-documents-gemini"
     gemini_embedding_model_name: str = "gemini-embedding-001"
