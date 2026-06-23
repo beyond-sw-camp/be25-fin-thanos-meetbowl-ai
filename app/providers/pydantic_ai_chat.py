@@ -5,6 +5,7 @@ from typing import Any
 
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.exceptions import ModelHTTPError
+from pydantic_ai.usage import UsageLimits
 from pydantic_ai.messages import (
     ModelMessage,
     ModelRequest,
@@ -89,6 +90,8 @@ class PydanticAiChatProvider:
             model_settings={
                 "temperature": temperature,
                 "google_thinking_config": {"thinking_budget": thinking_budget},
+                # Gemini 호출이 멈춰도 무한 대기하지 않도록 요청당 12초 상한을 둔다.
+                "timeout": 12,
             },
         )
 
@@ -214,7 +217,11 @@ class PydanticAiChatProvider:
         for attempt in range(self._max_retries + 1):
             try:
                 return await self._agent.run(
-                    command.question, deps=deps, message_history=message_history
+                    command.question,
+                    deps=deps,
+                    message_history=message_history,
+                    # 검색 tool 반복 폭주를 막아 응답이 무한정 길어지지 않게 모델 호출 횟수를 제한한다.
+                    usage_limits=UsageLimits(request_limit=5),
                 )
             except ModelHTTPError as error:
                 # 과부하/속도 제한이 아니면 일시적 장애가 아니므로 재시도하지 않고 그대로 전달한다.
