@@ -5,7 +5,6 @@ import httpx
 
 from app.core.errors import ProviderUnavailableError
 from app.rag.feedback_access_filter import build_feedback_access_filter
-from app.rag.sparse import SparseEncoder
 from app.schemas.feedback import FeedbackCandidate, MeetingFeedbackCommand
 
 
@@ -17,13 +16,11 @@ class QdrantMeetingFeedbackRetriever:
         qdrant_collection: str,
         candidate_limit: int,
         http_client: httpx.AsyncClient | None = None,
-        sparse_encoder: SparseEncoder | None = None,
     ) -> None:
         self._qdrant_url = qdrant_url.rstrip("/")
         self._qdrant_collection = qdrant_collection
         self._candidate_limit = candidate_limit
         self._http_client = http_client
-        self._sparse_encoder = sparse_encoder or SparseEncoder()
 
     async def search(
         self,
@@ -35,23 +32,12 @@ class QdrantMeetingFeedbackRetriever:
         access_filter = build_feedback_access_filter(
             command, exclude_meeting_id=str(command.meeting_id)
         )
-        sparse_vector = self._sparse_encoder.encode(query)
         body = {
-            "prefetch": [
-                {
-                    "query": vector,
-                    "using": "dense",
-                    "filter": access_filter,
-                    "limit": self._candidate_limit,
-                },
-                {
-                    "query": sparse_vector,
-                    "using": "sparse",
-                    "filter": access_filter,
-                    "limit": self._candidate_limit,
-                },
-            ],
-            "query": {"fusion": "rrf"},
+            # 피드백 임계값은 cosine 유사도에 적용한다. RRF 점수는 순위 결합값이라
+            # 0.78 같은 의미 유사도 임계값과 직접 비교할 수 없다.
+            "query": vector,
+            "using": "dense",
+            "filter": access_filter,
             "limit": self._candidate_limit,
             "with_payload": True,
         }

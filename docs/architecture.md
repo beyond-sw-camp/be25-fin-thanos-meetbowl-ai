@@ -279,7 +279,8 @@ meetbowl-be
 RabbitMQ
   ↓
 meetbowl-ai consumer
-  ↓ transcript load
+  ↓ BE internal minutes-generation-context 조회
+  ↓ Final Transcript sequence 정렬 결과 로드
   ↓ transcript cleanup
   ↓ agenda/decision/action item extraction
   ↓ minutes draft generation
@@ -327,24 +328,31 @@ meetbowl-fe
 
 ```text
 meetbowl-stt
-  ↓ Redis Stream: meeting.feedback.requested(final transcript window)
+  ↓ Redis Stream: meeting.feedback.segment.created(finalized segment + authenticated user snapshot)
 meetbowl-ai
-  ↓ 최근 발화 window 구성
-  ↓ 회의 주제 추정
-  ↓ 권한 기반 과거 회의록 검색
-  ↓ 중복 논의/이전 결정사항 판단
+  ↓ meeting/session별 최근 발화 window 구성
+  ↓ 현재 인증 참가자 전원의 allowedUserIds 권한 필터
+  ↓ 권한 기반 과거 회의록 hybrid 검색
+  ↓ 관련도 threshold/근거 유형/cooldown/dedupe 판정
   ↓ 근거 회의록 매핑
-  ↓ meeting.feedback.generated 발행
+  ↓ 기준 통과 시에만 meeting.feedback.generated 발행
 Redis Stream
   ↓
 meetbowl-stt
-  ↓ LiveKit DataChannel
+  ↓ audienceUserIds 대상 LiveKit DataChannel
 meetbowl-fe
 ```
 
 실시간 피드백은 회의 흐름을 방해하지 않도록 짧고 근거 중심으로 제공한다.
 
 피드백은 가능한 경우 관련 회의록 제목, 회의 일자, 결정사항 snippet을 포함한다.
+
+실시간 판정 경로에는 LLM을 사용하지 않는다. 권한 RAG 검색 결과와 사전에 색인된 metadata,
+결정적 분류 규칙으로 피드백 유형과 짧은 템플릿 메시지를 만든다.
+
+권한 필터를 통과한 후보가 없거나 관련도 threshold, 근거 유형, cooldown 또는 중복 제거
+기준을 통과하지 못하면 `meeting.feedback.generated`를 발행하지 않는다. 피드백이 없다는
+별도 결과도 사용자 화면에 전달하지 않는다.
 
 `meetbowl-ai`는 사용자 화면에 직접 피드백을 전송하지 않는다. 피드백 결과는 Redis Stream으로 `meetbowl-stt`에 전달하고, `meetbowl-stt`가 LiveKit DataChannel로 회의 참여자에게 전달한다.
 
@@ -367,7 +375,7 @@ StructuredGenerationPort ────────┘
 EmbeddingPort ───────────────────── Embedding Adapter
 ```
 
-챗봇, 회의록 요약, 실시간 피드백은 Workflow와 Prompt를 분리하되 동일한 생성
+챗봇과 회의록 요약은 Workflow와 Prompt를 분리하되 동일한 생성
 capability Port를 사용할 수 있다. Workflow는 `model_profile`을 요청하고 Adapter 또는
 라우터가 실제 Provider와 모델을 선택한다. 호출 결과에는 실제 사용한 모델명을 포함한다.
 
@@ -384,7 +392,8 @@ Provider 장애 시 fallback 정책을 적용할 수 있어야 한다.
 
 ## 12. JSON 출력 검증
 
-회의록, 피드백, 구조화 요약은 반드시 schema validation을 거친다.
+회의록과 구조화 요약의 LLM 출력은 반드시 schema validation을 거친다. 실시간 피드백은
+LLM 출력이 아니더라도 입력 segment, RAG 후보, 결과 이벤트 schema를 모두 검증한다.
 
 LLM 응답을 그대로 신뢰하지 않는다.
 

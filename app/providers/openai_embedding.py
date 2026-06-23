@@ -11,11 +11,13 @@ class OpenAIEmbeddingProvider:
         api_key: str | None,
         base_url: str,
         model_name: str,
+        dimensions: int | None = None,
         client: httpx.AsyncClient | None = None,
     ) -> None:
         self._api_key = api_key
         self._base_url = base_url.rstrip("/")
         self._model_name = model_name
+        self._dimensions = dimensions
         self._client = client or httpx.AsyncClient(timeout=30.0)
         self._owns_client = client is None
 
@@ -24,17 +26,20 @@ class OpenAIEmbeddingProvider:
             raise ProviderUnavailableError("OPENAI_API_KEY가 설정되지 않았습니다.")
 
         try:
+            request_body: dict[str, object] = {
+                "input": request.texts,
+                "model": self._model_name,
+                "encoding_format": "float",
+            }
+            if self._dimensions is not None:
+                request_body["dimensions"] = self._dimensions
             response = await self._client.post(
                 f"{self._base_url}/embeddings",
                 headers={
                     "Authorization": f"Bearer {self._api_key}",
                     "Content-Type": "application/json",
                 },
-                json={
-                    "input": request.texts,
-                    "model": self._model_name,
-                    "encoding_format": "float",
-                },
+                json=request_body,
             )
         except httpx.HTTPError as exc:
             raise ProviderUnavailableError(

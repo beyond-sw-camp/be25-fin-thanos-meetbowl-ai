@@ -10,7 +10,7 @@ from app.ports.embedding import EmbeddingPort, EmbeddingRequest
 from app.ports.generation import StructuredGenerationPort
 from app.providers.embedding_router import ProfileRoutingEmbeddingProvider
 from app.providers.fake_chat import FakeChatProvider
-from app.providers.fake_context_loader import FakeMinutesContextLoader
+from app.providers.http_minutes_context_loader import HttpMinutesContextLoader
 from app.providers.fake_embedding import FakeEmbeddingProvider
 from app.providers.fake_generation import FakeStructuredGenerationProvider
 from app.providers.fake_reranker import FakeReranker
@@ -68,7 +68,11 @@ def build_container(settings: Settings) -> Container:
     )
     return Container(
         minutes_workflow=MinutesGenerationWorkflow(
-            context_loader=FakeMinutesContextLoader(),
+            context_loader=HttpMinutesContextLoader(
+                base_url=settings.be_base_url,
+                internal_token=settings.internal_token,
+                timeout_seconds=settings.be_context_timeout_seconds,
+            ),
             structured_generation_port=structured_generation_port,
             model_profile=settings.minutes_model_profile,
             prompt_version=settings.minutes_prompt_version,
@@ -100,7 +104,6 @@ def build_container(settings: Settings) -> Container:
             embedding_port=embedding_port,
             retriever=feedback_retriever,
             query_model_profile=settings.query_embedding_model_profile,
-            prompt_version=settings.feedback_prompt_version,
             score_threshold=settings.feedback_score_threshold,
         ),
         qdrant_vector_store=qdrant_vector_store,
@@ -204,9 +207,10 @@ def _build_embedding_provider(
             api_key=settings.openai_api_key,
             base_url=settings.openai_base_url,
             model_name=profile.model_name,
+            dimensions=profile.dimensions,
         )
     if profile.provider == "fake":
-        return FakeEmbeddingProvider(profile.model_name)
+        return FakeEmbeddingProvider(profile.model_name, profile.dimensions or 4)
     raise ValueError(
         f"Unsupported embedding provider for profile {profile.name}: {profile.provider}"
     )

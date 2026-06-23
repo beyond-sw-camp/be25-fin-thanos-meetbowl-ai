@@ -15,7 +15,7 @@ import httpx
 from app.events.idempotency import InMemoryEventTracker
 from app.events.rabbit import DocumentIndexEventProcessor
 from app.providers.fake_embedding import FakeEmbeddingProvider
-from app.rag.qdrant_index import QdrantDocumentIndexer
+from app.rag.qdrant_vector_store import QdrantVectorStore
 from app.schemas.events import EventEnvelope
 from app.workflows.document_indexing import DocumentIndexingWorkflow
 
@@ -75,12 +75,16 @@ def _qdrant_handler(requests: list[httpx.Request]):
 
 def _processor(client: httpx.AsyncClient, tracker: InMemoryEventTracker) -> DocumentIndexEventProcessor:
     workflow = DocumentIndexingWorkflow(
-        embedding_provider=FakeEmbeddingProvider(),
-        indexer=QdrantDocumentIndexer(
-            qdrant_url="http://qdrant",
-            qdrant_collection="documents",
-            http_client=client,
+        embedding_port=FakeEmbeddingProvider("fake-embedding"),
+        vector_store_port=QdrantVectorStore(
+            base_url="http://qdrant",
+            collection_name="documents",
+            client=client,
         ),
+        model_profile="document-embedding",
+        chunk_size=1_200,
+        chunk_overlap=150,
+        chunk_strategy_version="paragraph-v1",
     )
     return DocumentIndexEventProcessor(
         workflow=workflow, tracker=tracker, max_retries=3
@@ -104,11 +108,13 @@ def test_be_index_event_is_consumed_and_indexed_into_qdrant() -> None:
     # 이벤트가 정상 처리되어 ack 되었다.
     assert message.acked == 1
     assert message.requeues == []
-    # Qdrant upsert 본문에 문서·소유자·유형 metadata가 저장됐다(MEETING_MINUTES→MINUTES).
-    upsert_body = requests[-1].read().decode()
-    assert str(document_id) in upsert_body
-    assert str(owner_user_id) in upsert_body
-    assert "MINUTES" in upsert_body
+    # 활성 색인 경로가 문서·소유자·유형과 BE가 계산한 사용자 ACL을 함께 저장한다.
+    upsert_body = json.loads(requests[-1].read())
+    payload = upsert_body["points"][0]["payload"]
+    assert payload["sourceId"] == str(document_id)
+    assert payload["ownerUserId"] == str(owner_user_id)
+    assert payload["sourceType"] == "MINUTES"
+    assert payload["allowedUserIds"] == [str(owner_user_id)]
 
 
 def test_duplicate_index_event_is_acked_without_reindexing() -> None:
