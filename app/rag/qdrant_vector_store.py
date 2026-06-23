@@ -4,6 +4,15 @@ from app.core.errors import DocumentIndexFailedError
 from app.ports.vector_store import ReplaceDocumentRequest
 from app.rag.sparse import SparseEncoder
 
+# 권한·유형 필터에 쓰는 payload 필드. 대규모 포인트에서 인덱스 없이 필터하면 풀스캔이 되므로
+# keyword 인덱스를 만들어 검색 시 후보 pool을 인덱스로 좁힌다.
+_FILTERED_PAYLOAD_FIELDS = (
+    "ownerUserId",
+    "workspaceId",
+    "sharedWorkspaceIds",
+    "sourceType",
+)
+
 
 class QdrantVectorStore:
     def __init__(
@@ -73,7 +82,18 @@ class QdrantVectorStore:
                     "Qdrant collection vector dimension이 현재 설정과 다릅니다.",
                     retryable=False,
                 )
+        await self._ensure_payload_indexes()
         self._ensured_dimensions = vector_size
+
+    async def _ensure_payload_indexes(self) -> None:
+        # 필터 필드별 keyword 인덱스를 보장한다. 이미 있으면 Qdrant가 멱등 처리하므로 매번 호출해도 안전하다.
+        for field_name in _FILTERED_PAYLOAD_FIELDS:
+            await self._request(
+                "PUT",
+                f"/collections/{self._collection_name}/index",
+                params={"wait": "true"},
+                json={"field_name": field_name, "field_schema": "keyword"},
+            )
 
     async def _delete_document_points(self, document_id: str) -> None:
         response = await self._request(

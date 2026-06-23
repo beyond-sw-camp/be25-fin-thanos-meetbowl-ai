@@ -23,6 +23,8 @@ def _make_provider(agent_run, *, max_retries: int = 2) -> PydanticAiChatProvider
     provider._top_n = 10
     provider._max_retries = max_retries
     provider._retry_backoff_seconds = 0.0
+    provider._request_limit = 5
+    provider._query_expander = None
     provider._agent = type("FakeAgent", (), {"run": staticmethod(agent_run)})()
     return provider
 

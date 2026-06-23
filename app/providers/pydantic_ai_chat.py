@@ -1,10 +1,15 @@
 import asyncio
+import html
+import logging
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from html.parser import HTMLParser
 from typing import Any
 
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.exceptions import ModelHTTPError
+from pydantic_ai.models.fallback import FallbackExceptionGroup
 from pydantic_ai.usage import UsageLimits
 from pydantic_ai.messages import (
     ModelMessage,
@@ -19,6 +24,8 @@ from app.ports.embedding_provider import EmbeddingProvider
 from app.ports.reranker import Reranker
 from app.prompts.chat import CHAT_SYSTEM_PROMPT
 from app.rag.qdrant_chat import QdrantChatRetriever
+from app.rag.multi_query_search import search_queries_in_parallel
+from app.rag.query_expansion import QueryExpander
 from app.schemas.chat import (
     ChatCommand,
     ChatMessage,
@@ -32,6 +39,10 @@ from app.schemas.chat import (
 _RETRYABLE_STATUS_CODES = frozenset({429, 503})
 # 사용자의 '오늘/이번 주'는 한국 시간 기준이므로 모델에 KST 날짜를 알려준다.
 _KST = timezone(timedelta(hours=9))
+# 모델이 본문에 남기는 [3], [3, 4] 같은 내부 인용 번호 표기(출처는 cited_indices로 따로 노출한다).
+_CITATION_MARKER_PATTERN = re.compile(r"\s*\[\s*\d+(?:\s*,\s*\d+)*\s*\]")
+
+logger = logging.getLogger("uvicorn.error")
 
 
 @dataclass
@@ -70,15 +81,19 @@ class PydanticAiChatProvider:
         retry_backoff_seconds: float = 0.5,
         document_max_chars: int = 16000,
         thinking_budget: int = 0,
+        request_limit: int = 5,
+        query_expander: QueryExpander | None = None,
     ) -> None:
         self._embedding_provider = embedding_provider
         self._retriever = retriever
         self._reranker = reranker
+        self._query_expander = query_expander
         self._model_name = model_name
         self._prompt_version = prompt_version
         self._candidate_pool = candidate_pool
         self._top_n = top_n
         self._max_retries = max_retries
+        self._request_limit = request_limit
         self._retry_backoff_seconds = retry_backoff_seconds
         self._document_max_chars = document_max_chars
         self._agent: Agent[ChatDeps, GeneratedChatAnswer] = Agent(
@@ -90,8 +105,9 @@ class PydanticAiChatProvider:
             model_settings={
                 "temperature": temperature,
                 "google_thinking_config": {"thinking_budget": thinking_budget},
-                # Gemini 호출이 멈춰도 무한 대기하지 않도록 요청당 12초 상한을 둔다.
-                "timeout": 12,
+                # thinking을 켜면 호출당 응답이 길어진다. 정상 추론을 끊지 않도록 요청당 20초로 두되,
+                # 멈춤은 막는다(총 시간은 BE 45초/FE 60초가 감싼다).
+                "timeout": 20,
             },
         )
 
@@ -111,17 +127,31 @@ class PydanticAiChatProvider:
             질문이 특정 자료 유형(메일/회의록/개인메모 등)에 한정될 때만 source_types로
             범위를 좁히고, 그렇지 않으면 비워 전체 유형을 검색한다.
             """
-            vector = await ctx.deps.embedding_provider.embed(query)
-            # 넓게(pool) 검색해 후보를 모은 뒤 reranker로 정밀하게 상위 top_n을 추린다.
-            candidates = await ctx.deps.retriever.search(
-                vector=vector,
-                query=query,
+            # 한↔영 번역·인명 음역으로 질의를 확장해 교차언어 문서도 dense·sparse 양쪽에서 매칭되게 한다.
+            search_queries = [query]
+            if self._query_expander is not None:
+                search_queries = await self._query_expander.search_queries(query)
+            sources = await search_queries_in_parallel(
+                queries=search_queries,
                 command=ctx.deps.command,
+                embedding_provider=ctx.deps.embedding_provider,
+                retriever=ctx.deps.retriever,
+                reranker=self._reranker,
                 source_types=source_types,
-                limit=self._candidate_pool,
+                candidate_pool=self._candidate_pool,
+                top_n=self._top_n,
             )
-            sources = await self._reranker.rerank(
-                query=query, sources=candidates, top_n=self._top_n
+            # threshold가 어떤 후보를 걸러내는지 추적: 컷 전 후보 점수와 컷 후 생존 자료를 함께 남긴다.
+            logger.info(
+                "[chat-retrieval] query=%r searches=%r types=%s kept=%d",
+                query,
+                search_queries,
+                source_types,
+                len(sources),
+            )
+            logger.info(
+                "[chat-retrieval] kept sources(post-cut): %s",
+                [(s.title[:30], round(s.score, 4)) for s in sources],
             )
             _accumulate_sources(ctx.deps.retrieved_sources, sources)
             if not sources:
@@ -203,7 +233,7 @@ class PydanticAiChatProvider:
         )
         result = await self._run_with_retry(deps, command)
         return ChatResult(
-            answer=result.output.answer,
+            answer=_normalize_answer_format(result.output.answer),
             sources=_select_cited_sources(
                 deps.retrieved_sources, result.output.cited_indices
             ),
@@ -221,11 +251,12 @@ class PydanticAiChatProvider:
                     deps=deps,
                     message_history=message_history,
                     # 검색 tool 반복 폭주를 막아 응답이 무한정 길어지지 않게 모델 호출 횟수를 제한한다.
-                    usage_limits=UsageLimits(request_limit=5),
+                    usage_limits=UsageLimits(request_limit=self._request_limit),
                 )
-            except ModelHTTPError as error:
+            except (ModelHTTPError, FallbackExceptionGroup) as error:
                 # 과부하/속도 제한이 아니면 일시적 장애가 아니므로 재시도하지 않고 그대로 전달한다.
-                if error.status_code not in _RETRYABLE_STATUS_CODES:
+                # FallbackModel은 모든 대체 모델이 실패하면 ExceptionGroup으로 모아 던진다.
+                if not _is_retryable_overload(error):
                     raise
                 if attempt == self._max_retries:
                     # 재시도를 소진해도 과부하면 503을 그대로 전달한다.
@@ -236,6 +267,88 @@ class PydanticAiChatProvider:
                 await asyncio.sleep(self._retry_backoff_seconds * 2**attempt)
                 # 검색 Tool이 이전 시도에서 채운 citation이 다음 시도에 중복 누적되지 않게 비운다.
                 deps.retrieved_sources.clear()
+
+
+def _strip_citation_markers(text: str) -> str:
+    """모델이 본문에 남긴 [3], [3, 4] 같은 내부 인용 번호를 제거한다(출처는 cited_indices로 따로 표시).
+
+    프롬프트로도 막지만, 모델이 가끔 본문에 인용 번호를 박아 넣으므로 안전망으로 한 번 더 제거한다.
+    숫자·쉼표만 든 대괄호만 지우므로 '[중요]' 같은 일반 대괄호 표현은 보존한다.
+    """
+    cleaned = _CITATION_MARKER_PATTERN.sub("", text)
+    # 번호를 떼며 생긴 구두점 앞 공백과 중복 공백을 정리한다.
+    cleaned = re.sub(r" +([.,!?])", r"\1", cleaned)
+    cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+    return cleaned.strip()
+
+
+class _AnswerHtmlToTextParser(HTMLParser):
+    """모델이 반환한 간단한 HTML 문단·목록을 안전한 일반 텍스트로 변환한다."""
+
+    _BLOCK_TAGS = {"p", "div", "ul", "ol", "section", "h1", "h2", "h3"}
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        del attrs
+        if tag == "li":
+            self.parts.append("\n- ")
+        elif tag == "br":
+            self.parts.append("\n")
+        elif tag in self._BLOCK_TAGS:
+            self.parts.append("\n")
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "li" or tag in self._BLOCK_TAGS:
+            self.parts.append("\n")
+
+    def handle_data(self, data: str) -> None:
+        self.parts.append(data)
+
+
+def _normalize_answer_format(text: str) -> str:
+    """HTML을 제거하고 긴 단일 문단을 최대 3문장 단위로 나눈다."""
+    cleaned = _strip_citation_markers(text)
+    if re.search(r"</?[a-zA-Z][^>]*>", cleaned):
+        parser = _AnswerHtmlToTextParser()
+        parser.feed(cleaned)
+        cleaned = html.unescape("".join(parser.parts))
+    cleaned = re.sub(r"[ \t]+\n", "\n", cleaned)
+    cleaned = re.sub(r"\n[ \t]+", "\n", cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+    if "\n" not in cleaned:
+        sentences = [
+            sentence.strip()
+            for sentence in re.split(r"(?<=[.!?])\s+", cleaned)
+            if sentence.strip()
+        ]
+        if len(sentences) >= 3:
+            paragraphs = [
+                " ".join(sentences[index : index + 3])
+                for index in range(0, len(sentences), 3)
+            ]
+            cleaned = "\n\n".join(paragraphs)
+    return cleaned
+
+
+def _is_retryable_overload(error: Exception) -> bool:
+    """Gemini의 일시적 과부하(429/503)인지 판정한다(재시도/대체모델 소진 모두 포함).
+
+    단일 모델은 ModelHTTPError로, FallbackModel은 모든 모델 실패를 ExceptionGroup으로 던지므로
+    그 안의 모든 원인이 과부하일 때만 일시 장애로 본다.
+    """
+    if isinstance(error, ModelHTTPError):
+        return error.status_code in _RETRYABLE_STATUS_CODES
+    if isinstance(error, FallbackExceptionGroup):
+        inner = error.exceptions
+        return bool(inner) and all(
+            isinstance(cause, ModelHTTPError)
+            and cause.status_code in _RETRYABLE_STATUS_CODES
+            for cause in inner
+        )
+    return False
 
 
 def _to_model_messages(history: list[ChatMessage]) -> list[ModelMessage]:
