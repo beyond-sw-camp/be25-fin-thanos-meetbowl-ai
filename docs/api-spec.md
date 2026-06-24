@@ -81,8 +81,11 @@ X-Internal-Token: {internalToken}
 | Method | Endpoint | 설명 | 호출 주체 |
 |---|---|---|---|
 | GET | `/health` | 서버 상태 확인 | Infra/API Server |
-| GET | `/health/llm` | LLM Provider 연결 상태 확인 | Infra/API Server |
+| GET | `/health/ready` | Qdrant/Redis/RabbitMQ readiness 확인 | Infra/API Server |
 | GET | `/health/vector-store` | Qdrant 연결 상태 확인 | Infra/API Server |
+
+`/health/ready`는 유료 외부 LLM 호출을 포함하지 않는다. 운영 배포 smoke test는 이
+엔드포인트를 사용한다.
 
 ---
 
