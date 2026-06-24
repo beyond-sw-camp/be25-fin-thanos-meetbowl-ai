@@ -81,8 +81,11 @@ X-Internal-Token: {internalToken}
 | Method | Endpoint | 설명 | 호출 주체 |
 |---|---|---|---|
 | GET | `/health` | 서버 상태 확인 | Infra/API Server |
-| GET | `/health/llm` | LLM Provider 연결 상태 확인 | Infra/API Server |
+| GET | `/health/ready` | Qdrant/Redis/RabbitMQ readiness 확인 | Infra/API Server |
 | GET | `/health/vector-store` | Qdrant 연결 상태 확인 | Infra/API Server |
+
+`/health/ready`는 유료 외부 LLM 호출을 포함하지 않는다. 운영 배포 smoke test는 이
+엔드포인트를 사용한다.
 
 ---
 
@@ -98,6 +101,15 @@ FR-142~146
 회의 종료 후 자동 회의록 생성과 수동 재생성의 운영 기본 경로는 RabbitMQ Consumer다.
 
 REST API는 테스트, 관리성 수동 호출, 장애 대응용 재처리 경로로 사용한다.
+
+현재 개발 단계의 회의록 생성 파이프라인은 Gemini API의 structured output을 사용한다.
+생성 workflow의 원문 입력 계약은 하나의 긴 `rawTranscript` 문자열이다. RabbitMQ 이벤트
+경로에서는 `meetingId`로 `meetbowl-be`의 시스템 전용
+`GET /api/v1/internal/meetings/{meetingId}/minutes-generation-context`를 호출한다. BE는 저장된
+Final Transcript segment를 sequence 순으로 정렬·결합하고, 회의·검토자·참석자 정보와 함께
+반환한다. REST
+`/minutes/generate` 입력의 참여자와 `rawTranscript`는 동일한 workflow에서 직접 사용한다.
+외부 API 없는 회의록 테스트에는 `MINUTES_SUMMARY_PROVIDER=fake`를 사용할 수 있다.
 
 | Method | Endpoint | 설명 | 호출 주체 |
 |---|---|---|---|
@@ -126,15 +138,7 @@ REST API는 테스트, 관리성 수동 호출, 장애 대응용 재처리 경�
       "department": "기획팀"
     }
   ],
-  "transcripts": [
-    {
-      "speakerId": "speaker-1",
-      "speakerName": "홍길동",
-      "startedAtMs": 1000,
-      "endedAtMs": 5000,
-      "text": "오늘 회의 안건은..."
-    }
-  ]
+  "rawTranscript": "오늘 회의 안건은 배포 일정입니다.\n금요일 배포를 결정했습니다."
 }
 ```
 
@@ -164,6 +168,23 @@ REST API는 테스트, 관리성 수동 호출, 장애 대응용 재처리 경�
         }
       ]
     },
+    "editorContent": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 1
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "회의록"
+            }
+          ]
+        }
+      ]
+    },
     "model": "llm-model-name",
     "promptVersion": "minutes-v1",
     "generatedAt": "2026-06-02T01:05:00Z"
@@ -172,26 +193,38 @@ REST API는 테스트, 관리성 수동 호출, 장애 대응용 재처리 경�
 }
 ```
 
+`editorContent`는 검증된 `minutesDraft`를 AI 서버가 결정적으로 변환한 Tiptap
+StarterKit 호환 JSON이다. 회의 요약은 기본으로 포함하며, 안건별 논의, 결정사항,
+후속 조치는 실제 내용이 존재할 때만 섹션을 생성한다. Gemini가 editor node를 직접
+생성하지 않는다. 운영 RabbitMQ `minutes.generated` payload에도 같은 `editorContent`
+를 포함해 API 서버가 초안 본문을 그대로 저장하도록 한다.
+
 ---
 
-## 6. Real-time Meeting Feedback API
+## 6. Real-time Meeting Feedback Stream
 
-실시간 피드백은 REST보다 Redis Stream 소비 방식이 기본이다.
+실시간 피드백은 REST API가 아니라 Redis Stream으로 처리한다. `meetbowl-ai`는 finalized
+segment 단위 `meeting.feedback.segment.created`를 소비하고 meeting/session별 rolling
+window를 구성한다.
 
-REST API는 테스트/수동 호출/폴백 용도로 둔다.
+현재 인증 참가자 전원이 Qdrant `allowedUserIds`에 포함된 과거 회의록만 검색한다. 권한
+필터를 통과한 후보가 없거나 관련도 threshold, 근거 유형, cooldown 또는 중복 제거 기준을
+통과하지 못하면 결과 이벤트를 발행하지 않는다.
 
-| Method | Endpoint | 설명 | 호출 주체 |
-|---|---|---|---|
-| POST | `/meeting-feedback/analyze` | 현재 발화 기반 실시간 피드백 생성 | meetbowl-stt/meetbowl-be |
-| POST | `/meeting-feedback/remind-decisions` | 이전 결정사항 리마인드 생성 | meetbowl-stt/meetbowl-be |
-| POST | `/meeting-feedback/detect-duplicate` | 중복 논의 감지 | meetbowl-stt/meetbowl-be |
-
-### Response
+### Result Event Payload
 
 ```json
 {
-  "success": true,
-  "data": {
+  "eventId": "uuid",
+  "eventType": "meeting.feedback.generated",
+  "occurredAt": "2026-06-02T01:10:00Z",
+  "producer": "ai-server",
+  "version": 1,
+  "correlationId": "uuid",
+  "payload": {
+    "feedbackId": "uuid",
+    "meetingId": "uuid",
+    "sessionId": "uuid",
     "feedbackType": "DECISION_REMINDER",
     "message": "이 안건은 지난 회의에서 이미 A안으로 결정된 이력이 있습니다.",
     "sources": [
@@ -200,13 +233,15 @@ REST API는 테스트/수동 호출/폴백 용도로 둔다.
         "meetingId": "uuid",
         "title": "지난 회의 제목",
         "meetingDate": "2026-05-20",
-        "snippet": "A안으로 진행하기로 결정"
+        "snippet": "A안으로 진행하기로 결정",
+        "score": 0.91
       }
     ],
-    "model": "llm-model-name",
+    "audienceUserIds": ["uuid"],
+    "fromSequence": 8,
+    "toSequence": 12,
     "generatedAt": "2026-06-02T01:10:00Z"
-  },
-  "message": null
+  }
 }
 ```
 
@@ -227,36 +262,22 @@ REST API는 테스트/수동 호출/폴백 용도로 둔다.
 
 ```json
 {
+  "requestId": "uuid",
+  "correlationId": "uuid",
   "userId": "uuid",
   "organizationId": "uuid",
-  "sessionId": "uuid",
   "question": "지난 회의에서 결정된 배포 일정 알려줘",
-  "allowedScopes": [
+  "messageHistory": [
     {
-      "type": "BACKUP_MAIL",
-      "resourceIds": ["uuid"]
+      "role": "user",
+      "content": "배포 관련 자료를 찾아줘"
     },
     {
-      "type": "MEETING_MINUTES",
-      "resourceIds": ["uuid"]
-    },
-    {
-      "type": "BOOKMARKED_MINUTES",
-      "resourceIds": ["uuid"]
-    },
-    {
-      "type": "PERSONAL_WORKSPACE",
-      "resourceIds": ["uuid"]
-    },
-    {
-      "type": "SHARED_WORKSPACE",
-      "resourceIds": ["uuid"]
-    },
-    {
-      "type": "SHARED_WORKSPACE_FILE",
-      "resourceIds": ["uuid"]
+      "role": "assistant",
+      "content": "관련 자료를 찾았습니다. 어떤 내용을 확인할까요?"
     }
-  ]
+  ],
+  "sharedWorkspaceIds": ["uuid"]
 }
 ```
 
@@ -281,9 +302,15 @@ REST API는 테스트/수동 호출/폴백 용도로 둔다.
 }
 ```
 
-권한이 없는 자료는 검색 결과와 답변에 포함하지 않는다.
+Qdrant 검색은 `organizationId`가 일치하면서 `ownerUserId == userId` 또는
+`workspaceId/sharedWorkspaceIds`가 요청의 `sharedWorkspaceIds`에 포함되는 자료로 제한한다.
+권한이 없는 자료는 검색 결과와 답변에 포함하지 않는다. `X-Internal-Token`이 없거나 다르면 403을 반환한다.
 
 자료에서 확인되지 않는 내용을 단정하지 않는다.
+
+`POST /chat`의 요청/응답 DTO는 챗봇 workflow 내부 모델과 분리한다. API 진입점의
+translator가 BE 계약을 내부 `ChatCommand`로 변환하고, 내부 `ChatResult`를 BE 응답
+계약으로 다시 변환한다. 따라서 BE 계약 변경은 이 변환 경계에서 우선 흡수한다.
 
 ---
 
@@ -318,12 +345,42 @@ REST API는 테스트, 관리성 수동 호출, 장애 대응용 재처리 경�
   "content": "색인할 본문",
   "metadata": {
     "meetingId": "uuid",
+    "approvedAt": "2026-06-02T01:00:00Z",
     "workspaceId": "uuid",
     "fileVersionId": "uuid",
-    "createdAt": "2026-06-02T01:00:00Z"
+    "mailId": "uuid"
   }
 }
 ```
+
+문서 색인은 두 경로로 트리거된다. ① BE가 RabbitMQ로 발행하는 `document.index.requested`
+이벤트를 AI consumer(`DocumentIndexEventProcessor`)가 소비하는 비동기 경로(운영 기본),
+② 내부 REST `POST /api/v1/indexes/documents`(직접 호출용). 둘 다 같은 색인 workflow로
+수렴한다. 이벤트 payload는 REST 요청 계약(`IndexDocumentRequest`)과 동일한 형식이다.
+
+현재 구현은 문서 본문을 청크로 분할(`chunk_max_chars`/`chunk_overlap_chars`)하고
+각 청크를 제목 문맥과 함께 embedding해 Qdrant에 **청크당 point 1개**로 upsert한다.
+하이브리드 검색을 위해 각 point에는 dense(의미) 벡터와 sparse(BM25, IDF) 벡터를 함께
+저장한다.
+청크 point ID는 `(documentId, chunkIndex)` 기반 결정적 UUID라서 재색인 시 같은 청크를
+덮어쓰며, upsert 전에 `documentId` 기준으로 기존 청크를 삭제해 잔여를 남기지 않는다.
+`MEETING_MINUTES` 입력은 챗봇 출처 타입 `MINUTES`로 변환한다. 저장되는 payload에는
+`organizationId`, `ownerUserId`, `sharedWorkspaceIds`, 선택적 `workspaceId`, `chunkIndex`가
+포함되어 챗봇과 동일한 권한 filter를 적용한다. citation은 `documentId` 단위로 모은다.
+컬렉션을 새로 만들 때 권한·유형 필터와 재색인 삭제에 쓰는 필드(`organizationId`,
+`ownerUserId`, `workspaceId`, `sharedWorkspaceIds`, `sourceType`, `documentId`)에 keyword
+payload 인덱스를 생성해 대용량에서 필터링 속도를 확보한다.
+
+기본 OpenAI 검색 공간은 `text-embedding-3-large`의 `dimensions=1536` 설정을 사용한다.
+문서 색인과 질의 embedding은 provider, 모델, 차원이 모두 같아야 하며, 이 값이 바뀌면
+기존 컬렉션을 재사용하지 않고 새 Qdrant 컬렉션에 전체 재색인한다.
+
+개발 환경에서 `LLM_PROVIDER=fake`, `FAKE_CHAT_RAG_ENABLED=true`를 사용하면 실제
+Qdrant 색인·검색과 권한 filter를 외부 Gemini 호출 없이 검증할 수 있다. 이 모드는
+운영 품질의 의미 embedding 또는 자연어 답변 품질을 검증하는 용도가 아니다.
+
+Gemini 운영 경로는 `gemini-embedding-001`을 기본 embedding 모델로 사용한다. fake
+embedding collection과 vector dimension이 다르므로 Gemini 전용 collection을 사용한다.
 
 ---
 
@@ -336,7 +393,7 @@ REST API는 테스트, 관리성 수동 호출, 장애 대응용 재처리 경�
 | RabbitMQ `ai.minutes.generate` | `meeting.ended` | 회의 종료 후 회의록 생성 |
 | RabbitMQ `ai.minutes.regenerate` | `minutes.generation.requested` | 회의록 생성/재생성 |
 | RabbitMQ `ai.index.document` | `document.index.requested` | 자료 색인 |
-| Redis Stream | `meeting.feedback.requested` | Final Transcript 기반 실시간 피드백 분석 |
+| Redis Stream | `meeting.feedback.segment.created` | Finalized Transcript segment 기반 실시간 피드백 입력 |
 
 발행:
 

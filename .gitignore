@@ -30,3 +30,8 @@ __pycache__/
 .python-version
 .ruff_cache/
 .venv/
+
+# Environment variables
+.env
+.env.*
+!.env.example

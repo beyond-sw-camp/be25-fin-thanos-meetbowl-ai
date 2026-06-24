@@ -1,0 +1,54 @@
+{
+  "documents": [
+    {
+      "document_type": "PERSONAL_MEMO",
+      "title": "분기 OKR 회의 메모",
+      "content": "2분기 OKR 회의에서 결정된 핵심 목표는 신규 가입자 30% 증가와 결제 전환율 개선이다. 담당자는 이은혜이며 다음 회의는 6월 24일 오후 3시에 진행한다.",
+      "created_at": "today"
+    },
+    {
+      "document_type": "PERSONAL_MEMO",
+      "title": "런칭 마케팅 메모",
+      "content": "신제품 런칭 타겟은 30대 직장인이며 채널은 인스타, 네이버, 카카오다. 마케팅 예산은 1.2억이고 런칭일은 6월 1일이다.",
+      "created_at": "today"
+    },
+    {
+      "document_type": "BACKUP_MAIL",
+      "title": "거래처 미팅 메일",
+      "content": "거래처와의 미팅은 다음 주 화요일 오후 2시로 확정되었습니다. 장소는 본사 3층 회의실입니다.",
+      "created_at": "yesterday"
+    }
+  ],
+  "cases": [
+    {
+      "id": "okr-goals",
+      "question": "OKR 회의에서 정한 목표 알려줘",
+      "expect": { "contains": ["가입자", "전환율"], "cites": "분기 OKR 회의 메모" }
+    },
+    {
+      "id": "marketing-budget",
+      "question": "런칭 마케팅 예산 얼마야?",
+      "expect": { "contains": ["1.2억"] }
+    },
+    {
+      "id": "meeting-date",
+      "question": "거래처 미팅 언제야?",
+      "expect": { "contains": ["화요일"] }
+    },
+    {
+      "id": "count-memos",
+      "question": "내 메모 몇 개야?",
+      "expect": { "contains": ["2"] }
+    },
+    {
+      "id": "list-today",
+      "question": "오늘 만든 메모 전체 알려줘",
+      "expect": { "min_sources": 2 }
+    },
+    {
+      "id": "refuse-offtopic",
+      "question": "회사 주차장 위치 알려줘",
+      "expect": { "refuses": true }
+    }
+  ]
+}

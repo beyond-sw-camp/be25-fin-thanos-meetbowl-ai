@@ -77,10 +77,13 @@ Pydantic Model을 사용한다.
 
 LLM 호출은 반드시 Provider 추상화를 사용한다.
 
-공통 인터페이스:
+Provider Port는 기능(capability) 단위로 분리한다.
 
 ```text
-LLMProvider
+TextGenerationPort
+StreamingGenerationPort
+StructuredGenerationPort
+EmbeddingPort
 ```
 
 구현체:
@@ -90,6 +93,27 @@ GeminiProvider
 ClaudeProvider
 OpenAIProvider
 ```
+
+Workflow는 실제 Provider 모델명이 아니라 `model_profile`을 요청한다.
+Provider Adapter 또는 라우터가 profile을 실제 Provider/모델로 매핑한다.
+
+```text
+chatbot
+minutes-summary
+meeting-feedback
+document-embedding
+query-embedding
+```
+
+도메인별 `ChatbotLLMProvider`, `MinutesLLMProvider`를 만들거나 Provider Adapter에
+`generate_minutes` 같은 도메인 메서드를 추가하지 않는다.
+
+각 프로필은 Provider, 모델명, temperature를 독립 설정한다. 현재 같은 모델을 사용하더라도
+기능별 설정을 공유하지 않는다.
+
+Embedding은 문서와 질의의 벡터 호환성을 확인한 뒤 모델을 변경한다. 프로필 설정은
+`document-embedding`, `query-embedding`으로 분리하되 같은 검색 공간을 사용하는 경우
+동일 모델과 차원을 유지한다.
 
 Provider Fallback 우선순위:
 
@@ -163,6 +187,9 @@ RAG 검색에는 권한 필터를 필수로 적용한다.
 ```
 
 권한 없는 자료는 검색 결과, 피드백, 챗봇 답변에 포함하지 않는다.
+
+실시간 피드백은 현재 인증 참가자 전원이 열람 가능한 근거가 있고 관련도 및 발행 기준을
+통과할 때만 생성한다. 조건을 충족하지 않으면 결과 이벤트를 발행하지 않는다.
 
 ---
 

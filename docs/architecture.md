@@ -74,6 +74,12 @@ Qdrant에는 원본 업무 데이터 전체를 저장하지 않는다.
 
 권한 필터링에 필요한 최소 metadata만 함께 저장한다.
 
+문서 색인은 `DocumentIndexingWorkflow`가 embedding provider와 `rag` 모듈의 Qdrant
+index adapter를 조율한다. REST 입력 계약은 translator를 거쳐 내부 command로 변환되며,
+검색 시 사용하는 source type과 권한 metadata를 동일한 형식으로 저장한다. 본문은
+`rag.chunking`이 문단 경계와 overlap을 고려해 청크로 나누고, 청크마다 별도 point로
+색인해 긴 문서에서도 질문과 맞는 부분만 검색되도록 한다.
+
 ### RabbitMQ
 
 오래 걸리거나 반드시 처리되어야 하는 AI 작업에 사용한다.
@@ -122,6 +128,29 @@ provider / adapter
 - Redis Stream Consumer
 
 여기에는 AI 로직을 직접 작성하지 않는다.
+
+BE 챗봇 REST 계약은 API schema에서만 해석하고 translator를 거쳐 내부
+`ChatCommand`로 변환한다. BE 요청/응답 필드가 변경될 때 workflow와 provider 계약을
+직접 변경하지 않고 translator에서 호환성을 조정한다.
+
+챗봇 답변은 PydanticAI Agent가 생성한다. 접근 context(`ChatCommand`)를 Agent
+dependency로 주입하고, Agent는 `search_documents` Tool을 호출해 근거를 검색한 뒤
+구조화된 답변(`GeneratedChatAnswer`)을 반환한다. `messageHistory`는 Agent 실행
+문맥으로만 전달하고 저장하지 않는다. 검색 Tool은 질문이 특정 유형에 한정될 때
+`source_types` 인자로 범위를 좁힐 수 있고, 검색 결과는 넓게 모은 뒤 reranker가 질의
+관련도로 재정렬해 상위 N개만 답변 근거로 쓴다(`ports.reranker` — 운영은 Gemini,
+테스트는 결정적 Fake).
+
+챗봇 검색은 dense(의미) 벡터와 sparse(BM25) 벡터를 함께 쓰는 하이브리드 방식이다.
+색인 시 `rag.sparse`가 청크마다 sparse 벡터를 만들어 dense 벡터와 같이 저장하고,
+검색 시 두 경로를 Qdrant의 RRF(Reciprocal Rank Fusion)로 융합해 의미·키워드 매칭을
+모두 살린다. sparse 인덱스는 `modifier: idf`라서 Qdrant가 질의 시점에 IDF를 적용한다.
+
+챗봇 검색 권한 조건은 `rag.access_filter`의 공통 builder에서 생성한다. 모든 검색은
+조직 일치 조건과 `ownerUserId == userId` 또는 BE가 요청마다 계산한 공유 워크스페이스
+조건을 함께 적용하며, 권한 필터는 dense·sparse 두 검색 경로 모두에 붙는다. 실제 Qdrant
+HTTP 호출과 payload-to-source 변환도 `rag` adapter가 담당하며 검색 Tool은 `rag`
+adapter를 통해서만 Qdrant에 접근한다.
 
 ### workflow / usecase
 
@@ -250,7 +279,8 @@ meetbowl-be
 RabbitMQ
   ↓
 meetbowl-ai consumer
-  ↓ transcript load
+  ↓ BE internal minutes-generation-context 조회
+  ↓ Final Transcript sequence 정렬 결과 로드
   ↓ transcript cleanup
   ↓ agenda/decision/action item extraction
   ↓ minutes draft generation
@@ -298,24 +328,31 @@ meetbowl-fe
 
 ```text
 meetbowl-stt
-  ↓ Redis Stream: meeting.feedback.requested(final transcript window)
+  ↓ Redis Stream: meeting.feedback.segment.created(finalized segment + authenticated user snapshot)
 meetbowl-ai
-  ↓ 최근 발화 window 구성
-  ↓ 회의 주제 추정
-  ↓ 권한 기반 과거 회의록 검색
-  ↓ 중복 논의/이전 결정사항 판단
+  ↓ meeting/session별 최근 발화 window 구성
+  ↓ 현재 인증 참가자 전원의 allowedUserIds 권한 필터
+  ↓ 권한 기반 과거 회의록 hybrid 검색
+  ↓ 관련도 threshold/근거 유형/cooldown/dedupe 판정
   ↓ 근거 회의록 매핑
-  ↓ meeting.feedback.generated 발행
+  ↓ 기준 통과 시에만 meeting.feedback.generated 발행
 Redis Stream
   ↓
 meetbowl-stt
-  ↓ LiveKit DataChannel
+  ↓ audienceUserIds 대상 LiveKit DataChannel
 meetbowl-fe
 ```
 
 실시간 피드백은 회의 흐름을 방해하지 않도록 짧고 근거 중심으로 제공한다.
 
 피드백은 가능한 경우 관련 회의록 제목, 회의 일자, 결정사항 snippet을 포함한다.
+
+실시간 판정 경로에는 LLM을 사용하지 않는다. 권한 RAG 검색 결과와 사전에 색인된 metadata,
+결정적 분류 규칙으로 피드백 유형과 짧은 템플릿 메시지를 만든다.
+
+권한 필터를 통과한 후보가 없거나 관련도 threshold, 근거 유형, cooldown 또는 중복 제거
+기준을 통과하지 못하면 `meeting.feedback.generated`를 발행하지 않는다. 피드백이 없다는
+별도 결과도 사용자 화면에 전달하지 않는다.
 
 `meetbowl-ai`는 사용자 화면에 직접 피드백을 전송하지 않는다. 피드백 결과는 Redis Stream으로 `meetbowl-stt`에 전달하고, `meetbowl-stt`가 LiveKit DataChannel로 회의 참여자에게 전달한다.
 
@@ -329,14 +366,25 @@ Provider 직접 호출 코드를 Workflow에 작성하지 않는다.
 
 반드시 Provider Adapter를 통해 호출한다.
 
-권장 구조:
+Provider Port는 도메인이 아니라 기능(capability) 단위로 분리한다.
 
 ```text
-LLMProvider interface
-  ├─ GeminiProvider
-  ├─ OpenAIProvider
-  └─ ClaudeProvider
+TextGenerationPort ───────────────┐
+StreamingGenerationPort ─────────┼─ Gemini/OpenAI/Claude Adapter
+StructuredGenerationPort ────────┘
+EmbeddingPort ───────────────────── Embedding Adapter
 ```
+
+챗봇과 회의록 요약은 Workflow와 Prompt를 분리하되 동일한 생성
+capability Port를 사용할 수 있다. Workflow는 `model_profile`을 요청하고 Adapter 또는
+라우터가 실제 Provider와 모델을 선택한다. 호출 결과에는 실제 사용한 모델명을 포함한다.
+
+기본 생성 프로필은 `minutes-summary`, `chatbot`, `meeting-feedback`이며 각 프로필은
+Provider, 모델명, temperature를 독립적으로 설정한다. 프로필 이름이 중복되거나 지원하지
+않는 Provider가 설정되면 서버 시작 시 실패한다.
+
+Embedding 프로필은 문서 인덱싱용 `document-embedding`과 검색 질의용
+`query-embedding`을 분리한다. 두 프로필은 현재 같은 모델을 사용해도 독립적으로 설정한다.
 
 Provider 장애 시 fallback 정책을 적용할 수 있어야 한다.
 
@@ -344,7 +392,8 @@ Provider 장애 시 fallback 정책을 적용할 수 있어야 한다.
 
 ## 12. JSON 출력 검증
 
-회의록, 피드백, 구조화 요약은 반드시 schema validation을 거친다.
+회의록과 구조화 요약의 LLM 출력은 반드시 schema validation을 거친다. 실시간 피드백은
+LLM 출력이 아니더라도 입력 segment, RAG 후보, 결과 이벤트 schema를 모두 검증한다.
 
 LLM 응답을 그대로 신뢰하지 않는다.
 
