@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import Awaitable, Callable
 from typing import Protocol
 
@@ -31,19 +32,33 @@ class EventPublisher(Protocol):
     async def publish(self, envelope: EventEnvelope) -> None: ...
 
 
+class AsyncEventTracker(Protocol):
+    async def is_completed(self, event_id) -> bool: ...
+
+    async def mark_completed(self, event_id) -> None: ...
+
+    async def increment_retry(self, event_id) -> int: ...
+
+
 class MinutesEventProcessor:
     def __init__(
         self,
         *,
         workflow: MinutesGenerationWorkflow,
         publisher: EventPublisher,
-        tracker: RedisEventTracker,
+        tracker: AsyncEventTracker,
         max_retries: int,
+        retry_delay_base_seconds: float,
+        retry_delay_max_seconds: float,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
         self._workflow = workflow
         self._publisher = publisher
         self._tracker = tracker
         self._max_retries = max_retries
+        self._retry_delay_base_seconds = retry_delay_base_seconds
+        self._retry_delay_max_seconds = retry_delay_max_seconds
+        self._sleep = sleep
 
     async def process(self, message: IncomingMessage) -> None:
         try:
@@ -67,23 +82,39 @@ class MinutesEventProcessor:
                 )
             )
         except AiError as exc:
-            if (
-                exc.retryable
-                and await self._tracker.increment_retry(envelope.event_id) <= self._max_retries
-            ):
-                await message.reject(requeue=True)
-            else:
-                await message.reject(requeue=False)
+            await self._handle_failure(
+                message=message,
+                event_id=envelope.event_id,
+                retryable=exc.retryable,
+            )
             return
         except Exception:
-            if await self._tracker.increment_retry(envelope.event_id) <= self._max_retries:
-                await message.reject(requeue=True)
-            else:
-                await message.reject(requeue=False)
+            await self._handle_failure(
+                message=message,
+                event_id=envelope.event_id,
+                retryable=True,
+            )
             return
 
         await self._tracker.mark_completed(envelope.event_id)
         await message.ack()
+
+    async def _handle_failure(self, *, message: IncomingMessage, event_id, retryable: bool) -> None:
+        if not retryable:
+            await message.reject(requeue=False)
+            return
+        retry_count = await self._tracker.increment_retry(event_id)
+        if retry_count > self._max_retries:
+            await message.reject(requeue=False)
+            return
+        await self._sleep(self._retry_delay_seconds(retry_count))
+        await message.reject(requeue=True)
+
+    def _retry_delay_seconds(self, retry_count: int) -> float:
+        return min(
+            self._retry_delay_base_seconds * (2 ** max(retry_count - 1, 0)),
+            self._retry_delay_max_seconds,
+        )
 
 
 class DocumentIndexEventProcessor:
@@ -188,7 +219,15 @@ class AioPikaEventPublisher:
     async def publish(self, envelope: EventEnvelope) -> None:
         body = envelope.model_dump_json(by_alias=True).encode()
         await self._exchange.publish(
-            aio_pika.Message(body=body, content_type="application/json"),
+            aio_pika.Message(
+                body=body,
+                content_type="application/json",
+                delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
+                message_id=str(envelope.event_id),
+                correlation_id=str(envelope.correlation_id),
+                type=envelope.event_type,
+                app_id=envelope.producer,
+            ),
             routing_key=self._routing_key,
         )
 
@@ -210,7 +249,11 @@ class RabbitRuntime:
         self._connection = await aio_pika.connect_robust(
             self._settings.rabbitmq_connection_url()
         )
-        channel = await self._connection.channel()
+        channel = await self._connection.channel(
+            publisher_confirms=True,
+            on_return_raises=True,
+        )
+        await channel.set_qos(prefetch_count=self._settings.rabbitmq_prefetch_count)
         exchange, _ = await self._declare_topology(channel)
         publisher = AioPikaEventPublisher(
             exchange, self._settings.rabbitmq_minutes_generated_routing_key
@@ -225,6 +268,8 @@ class RabbitRuntime:
                 ttl_seconds=self._settings.rabbitmq_idempotency_ttl_seconds,
             ),
             max_retries=self._settings.rabbitmq_max_retries,
+            retry_delay_base_seconds=self._settings.rabbitmq_retry_base_delay_seconds,
+            retry_delay_max_seconds=self._settings.rabbitmq_retry_max_delay_seconds,
         )
         document_index_processor = DocumentIndexEventProcessor(
             workflow=self._document_indexing_workflow,
