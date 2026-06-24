@@ -29,7 +29,7 @@ class HttpMinutesContextLoader:
         # REST generation already contains a complete context. RabbitMQ commands intentionally do not
         # carry the transcript, so only that path calls the BE internal API.
         if self._has_inline_context(command):
-            return MinutesGenerationContext(**command.model_dump())
+            return self._inline_context(command)
 
         if self._client is not None:
             response = await self._request(self._client, command.meeting_id)
@@ -124,4 +124,18 @@ class HttpMinutesContextLoader:
                 command.participants,
                 command.raw_transcript,
             )
+        )
+
+    @staticmethod
+    def _inline_context(command: MinutesGenerationCommand) -> MinutesGenerationContext:
+        return MinutesGenerationContext(
+            meeting_id=command.meeting_id,
+            organization_id=command.organization_id,
+            host_user_id=command.host_user_id,
+            reviewer_user_id=command.reviewer_user_id,
+            title=command.title,
+            started_at=command.started_at,
+            ended_at=command.ended_at,
+            participants=command.participants,
+            raw_transcript=command.raw_transcript,
         )

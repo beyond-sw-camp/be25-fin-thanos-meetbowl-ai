@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from pydantic import ValidationError
 
 from app.core.errors import ContextNotFoundError, ResponseValidationError
+from app.pipelines.minutes_quality import finalize_minutes_draft
 from app.pipelines.transcript import normalize_raw_transcript
 from app.pipelines.tiptap import minutes_draft_to_tiptap
 from app.ports.context_loader import MinutesContextLoader
@@ -52,6 +53,7 @@ class MinutesGenerationWorkflow:
             draft = MinutesDraft.model_validate(generation_result.output)
         except ValidationError as exc:
             raise ResponseValidationError() from exc
+        draft = finalize_minutes_draft(raw_transcript=raw_transcript, draft=draft)
         return MinutesGenerationResult(
             meeting_id=context.meeting_id,
             organization_id=context.organization_id,
