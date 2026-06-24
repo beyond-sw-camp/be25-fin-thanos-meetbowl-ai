@@ -31,6 +31,24 @@ def test_loads_final_transcript_context_from_be() -> None:
                     "participants": [
                         {"userId": str(host_user_id), "name": "홍길동", "department": None}
                     ],
+                    "segments": [
+                        {
+                            "segmentId": "segment-1",
+                            "sequence": 1,
+                            "language": "KO",
+                            "sourceText": "첫 번째 확정 발화",
+                            "startedAtMs": 0,
+                            "endedAtMs": 500,
+                        },
+                        {
+                            "segmentId": "segment-2",
+                            "sequence": 2,
+                            "language": "KO",
+                            "sourceText": "두 번째 확정 발화",
+                            "startedAtMs": 600,
+                            "endedAtMs": 1000,
+                        },
+                    ],
                     "rawTranscript": "첫 번째 확정 발화\n두 번째 확정 발화",
                 },
                 "message": None,
@@ -59,6 +77,11 @@ def test_loads_final_transcript_context_from_be() -> None:
 
     context = asyncio.run(run())
     assert context.raw_transcript == "첫 번째 확정 발화\n두 번째 확정 발화"
+    assert [segment.sequence for segment in context.segments] == [1, 2]
+    assert [segment.source_text for segment in context.segments] == [
+        "첫 번째 확정 발화",
+        "두 번째 확정 발화",
+    ]
 
 
 def test_inline_rest_context_ignores_non_context_command_fields() -> None:
@@ -98,3 +121,4 @@ def test_inline_rest_context_ignores_non_context_command_fields() -> None:
     assert context.reviewer_user_id == reviewer_user_id
     assert context.title == "주간 회의"
     assert context.raw_transcript == "금요일 배포로 진행합니다."
+    assert [segment.source_text for segment in context.segments] == ["금요일 배포로 진행합니다."]

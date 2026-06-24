@@ -6,6 +6,7 @@ import httpx
 from pydantic import ValidationError
 
 from app.core.errors import AiError, ContextNotFoundError
+from app.pipelines.transcript import transcript_to_segments
 from app.schemas.workflow import MinutesGenerationCommand, MinutesGenerationContext
 
 
@@ -137,5 +138,6 @@ class HttpMinutesContextLoader:
             started_at=command.started_at,
             ended_at=command.ended_at,
             participants=command.participants,
+            segments=transcript_to_segments(command.raw_transcript),
             raw_transcript=command.raw_transcript,
         )
