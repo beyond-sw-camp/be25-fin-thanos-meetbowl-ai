@@ -68,6 +68,24 @@ def test_mark_suspicious_segments_flags_isolated_non_mainstream_script() -> None
     assert [segment.suspicious for segment in marked] == [False, True, False]
 
 
+def test_mark_suspicious_segments_flags_isolated_japanese_outlier() -> None:
+    segments = transcript_to_segments("배포 일정 논의\nありがとう\nQA 확인은 목요일까지 진행")
+
+    marked = mark_suspicious_segments(segments)
+
+    assert [segment.suspicious for segment in marked] == [False, True, False]
+
+
+def test_mark_suspicious_segments_keeps_consecutive_same_script_block() -> None:
+    segments = transcript_to_segments(
+        "배포 일정 논의\nありがとう\nよろしくお願いします\nQA 확인은 목요일까지 진행"
+    )
+
+    marked = mark_suspicious_segments(segments)
+
+    assert [segment.suspicious for segment in marked] == [False, False, False, False]
+
+
 def test_finalize_minutes_draft_rejects_english_summary_for_korean_transcript() -> None:
     transcript = "\n".join(
         [

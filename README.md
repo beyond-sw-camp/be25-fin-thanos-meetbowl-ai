@@ -1,16 +1,17 @@
 # meetbowl-ai
 
 Meetbowl AI API server. The minutes pipeline uses the Gemini API for structured meeting
-minutes generation. RabbitMQ events still use a deterministic fake context loader until
-the meetbowl-be internal context API is available.
+minutes generation.
 
 Provider ports are split by capability: text, streaming, structured generation, and
 embedding. Workflows request a logical model profile instead of depending on a concrete
 provider or model name.
 
-The generation workflow accepts one normalized `rawTranscript` string. If the upstream
-contract later becomes an utterance list, the context adapter should sort and join the
-utterances into this string before invoking the workflow.
+The generation workflow now prefers BE-provided transcript `segments` and rebuilds a
+normalized `rawTranscript` internally. Generation is evidence-first: the model extracts
+summary/agenda/decision/action evidence with `sourceSequences`, then the workflow drops
+invalid or suspicious-only evidence and deterministically converts the validated result
+into `MinutesDraft` and Tiptap `editorContent`.
 
 After Gemini output validation, the workflow deterministically converts `MinutesDraft`
 into Tiptap StarterKit-compatible `editorContent`. Gemini never generates editor nodes
@@ -29,6 +30,8 @@ cp .env.example .env
 Set `GEMINI_API_KEY` in `.env`. The default model is `gemini-2.5-flash`.
 For embeddings, set `OPENAI_API_KEY`. The default embedding model is
 `text-embedding-3-large`, shortened to 1536 dimensions.
+Minutes generation can also fall back to OpenAI when Gemini returns a transient 503.
+Configure this with `MINUTES_FALLBACK_PROVIDER` and `MINUTES_FALLBACK_MODEL`.
 
 ### API-only mode
 
@@ -108,13 +111,15 @@ RABBITMQ_ENABLED=true uv run fastapi dev
 ```
 
 The server consumes `meeting.ended`, `minutes.generation.requested`, and
-`document.index.requested`. It publishes `minutes.generated` after Gemini
-structured-output generation and schema validation, and it writes approved-document
-embeddings into Qdrant for `document.index.requested`.
+`document.index.requested`. It publishes `minutes.generated` after evidence extraction,
+schema validation, transcript-quality filtering, and deterministic Tiptap conversion,
+and it writes approved-document embeddings into Qdrant for `document.index.requested`.
 
 Generation models are selected by logical profile. The default profiles are
 `minutes-summary`, `chatbot`, and `meeting-feedback`; each has independent provider,
 model, and temperature settings. They currently default to the same Gemini model.
+Minutes structured generation can optionally fall back to OpenAI when the primary
+Gemini request is temporarily unavailable.
 Embedding settings are independently defined for `document-embedding` and
 `query-embedding`. The default provider is OpenAI, and the default model is
 `text-embedding-3-large` with 1536 dimensions. Document and query provider, model,
