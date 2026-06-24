@@ -63,23 +63,25 @@ def build_container(settings: Settings) -> Container:
         profile.name: _build_structured_generation_provider(profile, settings)
         for profile in settings.generation_model_profiles()
     }
+    generation_routes[settings.minutes_model_profile] = _wrap_generation_fallback(
+        primary=generation_routes[settings.minutes_model_profile],
+        primary_provider=settings.minutes_summary_provider,
+        fallback_provider=settings.minutes_fallback_provider,
+        fallback_model=settings.minutes_fallback_model,
+        fallback_temperature=settings.minutes_summary_temperature,
+        settings=settings,
+        route_name="minutes",
+    )
     # 챗봇 답변 생성(single_pass)은 Gemini 503 시 OpenAI로 폴백시켜 agentic의 FallbackModel과 동일한 내구성을 준다.
-    if (
-        settings.chatbot_provider == "gemini"
-        and settings.chatbot_fallback_provider in {"openai", "gpt"}
-        and settings.openai_api_key
-    ):
-        generation_routes[settings.chatbot_model_profile] = (
-            FallbackStructuredGenerationProvider(
-                primary=generation_routes[settings.chatbot_model_profile],
-                fallback=OpenAIStructuredGenerationProvider(
-                    api_key=settings.openai_api_key,
-                    base_url=settings.openai_base_url,
-                    model_name=settings.chatbot_fallback_model,
-                    default_temperature=settings.chatbot_temperature,
-                ),
-            )
-        )
+    generation_routes[settings.chatbot_model_profile] = _wrap_generation_fallback(
+        primary=generation_routes[settings.chatbot_model_profile],
+        primary_provider=settings.chatbot_provider,
+        fallback_provider=settings.chatbot_fallback_provider,
+        fallback_model=settings.chatbot_fallback_model,
+        fallback_temperature=settings.chatbot_temperature,
+        settings=settings,
+        route_name="chatbot",
+    )
     structured_generation_port = ProfileRoutingStructuredGenerationProvider(
         generation_routes
     )
@@ -292,6 +294,35 @@ def _build_chat_provider(
         model_name=settings.fake_chat_model_name,
         prompt_version=settings.chat_prompt_version,
         **chat_provider_kwargs,
+    )
+
+
+def _wrap_generation_fallback(
+    *,
+    primary: StructuredGenerationPort,
+    primary_provider: str,
+    fallback_provider: str,
+    fallback_model: str,
+    fallback_temperature: float,
+    settings: Settings,
+    route_name: str,
+) -> StructuredGenerationPort:
+    if primary_provider != "gemini" or fallback_provider not in {"openai", "gpt"}:
+        return primary
+    if not settings.openai_api_key:
+        logger.warning(
+            "%s fallback provider is openai but OPENAI_API_KEY is missing; fallback disabled.",
+            route_name,
+        )
+        return primary
+    return FallbackStructuredGenerationProvider(
+        primary=primary,
+        fallback=OpenAIStructuredGenerationProvider(
+            api_key=settings.openai_api_key,
+            base_url=settings.openai_base_url,
+            model_name=fallback_model,
+            default_temperature=fallback_temperature,
+        ),
     )
 
 

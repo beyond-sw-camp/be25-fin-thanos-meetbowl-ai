@@ -4,7 +4,7 @@ from uuid import UUID
 from pydantic import Field
 
 from app.schemas.base import UtcDatetimeModel
-from app.schemas.minutes import MinutesDraft, Participant
+from app.schemas.minutes import MinutesDraft, Participant, TranscriptSegment
 from app.schemas.tiptap import TiptapDocument
 
 
@@ -32,6 +32,7 @@ class MinutesGenerationContext(UtcDatetimeModel):
     started_at: datetime
     ended_at: datetime
     participants: list[Participant] = Field(default_factory=list)
+    segments: list[TranscriptSegment] = Field(default_factory=list)
     # 회의 원문의 외부 전달 형식과 생성 파이프라인을 분리하기 위한 정규화 경계다.
     raw_transcript: str = ""
 

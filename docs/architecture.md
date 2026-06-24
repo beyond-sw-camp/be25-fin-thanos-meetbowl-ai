@@ -281,8 +281,9 @@ RabbitMQ
 meetbowl-ai consumer
   ↓ BE internal minutes-generation-context 조회
   ↓ Final Transcript sequence 정렬 결과 로드
-  ↓ transcript cleanup
-  ↓ agenda/decision/action item extraction
+  ↓ transcript cleanup / suspicious segment marking
+  ↓ evidence extraction(summary/agenda/decision/action + sourceSequences)
+  ↓ invalid / suspicious-only evidence 제거
   ↓ minutes draft generation
   ↓ JSON schema validation
   ↓ quality check

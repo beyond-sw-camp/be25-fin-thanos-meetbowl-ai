@@ -41,6 +41,8 @@ class Settings(BaseSettings):
     minutes_summary_provider: str = "gemini"
     minutes_summary_model: str = "gemini-2.5-flash"
     minutes_summary_temperature: float = 0.2
+    minutes_fallback_provider: str = "openai"
+    minutes_fallback_model: str = "gpt-4.1-mini"
     chatbot_model_profile: str = "chatbot"
     # router = 질의별 분기(기본), single_pass = 검색1회+LLM1회(빠름, 의미검색만), agentic = LLM 툴 루프(느림/비결정적)
     chatbot_mode: str = "router"
