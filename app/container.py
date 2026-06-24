@@ -240,6 +240,7 @@ def _build_chat_provider(
                 candidate_pool=settings.rerank_candidate_pool,
                 top_n=settings.rerank_top_n,
                 query_expander=query_expander,
+                reasoning_budget=settings.chat_thinking_budget,
             )
 
         def make_agentic() -> PydanticAiChatProvider:

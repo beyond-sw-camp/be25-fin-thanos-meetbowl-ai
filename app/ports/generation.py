@@ -26,12 +26,18 @@ class StructuredGenerationRequest(Generic[StructuredOutput]):
     response_schema: type[StructuredOutput]
     model_profile: str
     temperature: float | None = None
+    # Provider가 지원하는 경우에만 적용한다. Gemini adapter는 thinking budget으로 매핑하고,
+    # 이를 지원하지 않는 provider는 무시한다.
+    reasoning_budget: int | None = None
 
 
 @dataclass(frozen=True)
 class StructuredGenerationResult(Generic[StructuredOutput]):
     output: StructuredOutput
     model_name: str
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    reasoning_tokens: int | None = None
 
 
 class TextGenerationPort(Protocol):

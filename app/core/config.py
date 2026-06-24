@@ -1,7 +1,7 @@
 from functools import lru_cache
 from urllib.parse import quote
 
-from pydantic import PositiveInt, model_validator
+from pydantic import NonNegativeInt, PositiveInt, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.core.model_profiles import EmbeddingModelProfile, GenerationModelProfile
@@ -88,7 +88,7 @@ class Settings(BaseSettings):
     qdrant_url: str = "http://localhost:6333"
     qdrant_collection: str = "meetbowl-documents-openai-large-1536"
     gemini_embedding_model_name: str = "gemini-embedding-001"
-    chat_prompt_version: str = "chat-v9"
+    chat_prompt_version: str = "chat-v10"
     chunk_max_chars: int = 1200
     chunk_overlap_chars: int = 150
     rerank_candidate_pool: int = 30
@@ -97,8 +97,9 @@ class Settings(BaseSettings):
     chat_score_threshold: float = 0.0
     # 문서 전체 요약 시 본문 회수 상한(글자). 거대 문서가 토큰을 폭주시키지 않게 자른다.
     chat_document_max_chars: int = 16000
-    # Gemini 사고(thinking) 토큰 예산. 256은 멀티홉 정답을 유지하면서 512 대비 지연을 줄인 측정값이다.
-    chat_thinking_budget: int = 256
+    # RAG 답변은 검색 근거를 정리하는 작업이다. 2026-06-24 회귀 평가에서 0/128/256이
+    # 동일 정확도를 보였고 0이 가장 빨랐으므로 기본 비활성화한다. 환경변수로 재평가할 수 있다.
+    chat_thinking_budget: NonNegativeInt = 0
     # agentic 툴 루프 모델 호출 상한. 3이 정답률을 지키는 최소선이다(2는 멀티홉 단계 부족으로 붕괴).
     chat_request_limit: int = 3
     feedback_window_max_segments: int = 8

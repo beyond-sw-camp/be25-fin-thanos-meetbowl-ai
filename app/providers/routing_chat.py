@@ -23,6 +23,7 @@ class RoutingChatProvider:
 
     async def answer(self, command: ChatCommand) -> ChatResult:
         mode = route_chat_mode(command.question)
-        logger.info("[chat-router] mode=%s question=%r", mode, command.question)
+        # 질문 본문은 휘발성 데이터이므로 로그에 남기지 않는다.
+        logger.info("[chat-router] mode=%s", mode)
         provider = self._single_pass if mode == "single_pass" else self._agentic
         return await provider.answer(command)

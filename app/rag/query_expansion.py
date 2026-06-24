@@ -108,6 +108,8 @@ class QueryExpander:
                     response_schema=QueryExpansion,
                     model_profile=self._model_profile,
                     temperature=0.0,
+                    # 검색어 변환은 짧고 정형적인 작업이므로 사고 토큰을 사용하지 않는다.
+                    reasoning_budget=0,
                 )
             )
             expansion = result.output

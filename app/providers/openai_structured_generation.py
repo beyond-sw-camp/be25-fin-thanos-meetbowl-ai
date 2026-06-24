@@ -52,7 +52,13 @@ class OpenAIStructuredGenerationProvider:
         parsed = response.choices[0].message.parsed
         if parsed is None:
             raise ResponseParseError("OpenAI가 빈 구조화 응답을 반환했습니다.")
-        return StructuredGenerationResult(output=parsed, model_name=self._model_name)
+        usage = getattr(response, "usage", None)
+        return StructuredGenerationResult(
+            output=parsed,
+            model_name=self._model_name,
+            input_tokens=getattr(usage, "prompt_tokens", None),
+            output_tokens=getattr(usage, "completion_tokens", None),
+        )
 
     def _get_client(self) -> Any:
         if self._client is not None:

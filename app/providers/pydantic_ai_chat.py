@@ -143,15 +143,10 @@ class PydanticAiChatProvider:
             )
             # threshold가 어떤 후보를 걸러내는지 추적: 컷 전 후보 점수와 컷 후 생존 자료를 함께 남긴다.
             logger.info(
-                "[chat-retrieval] query=%r searches=%r types=%s kept=%d",
-                query,
-                search_queries,
+                "[chat-retrieval] searches=%d types=%s kept=%d",
+                len(search_queries),
                 source_types,
                 len(sources),
-            )
-            logger.info(
-                "[chat-retrieval] kept sources(post-cut): %s",
-                [(s.title[:30], round(s.score, 4)) for s in sources],
             )
             _accumulate_sources(ctx.deps.retrieved_sources, sources)
             if not sources:
