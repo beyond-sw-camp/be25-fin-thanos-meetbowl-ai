@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     rabbitmq_document_index_removed_queue: str = "ai.index.document.removed"
     rabbitmq_minutes_generated_routing_key: str = "minutes.generated"
     rabbitmq_max_retries: int = 3
+    rabbitmq_prefetch_count: PositiveInt = 4
+    rabbitmq_retry_base_delay_seconds: float = 2.0
+    rabbitmq_retry_max_delay_seconds: float = 30.0
     rabbitmq_idempotency_ttl_seconds: int = 604800
     redis_feedback_enabled: bool = False
     redis_url: str = "redis://localhost:6379"
