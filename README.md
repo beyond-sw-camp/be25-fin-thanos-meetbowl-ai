@@ -42,6 +42,7 @@ The development server starts at `http://127.0.0.1:8000`.
 
 - OpenAPI docs: `http://127.0.0.1:8000/docs`
 - Health check: `http://127.0.0.1:8000/api/v1/health`
+- Readiness check: `http://127.0.0.1:8000/api/v1/health/ready`
 - Minutes generation: `POST http://127.0.0.1:8000/api/v1/minutes/generate`
 - Chatbot: `POST http://127.0.0.1:8000/api/v1/chat` (`X-Internal-Token` required)
 
@@ -123,6 +124,11 @@ and full document reindexing.
 Document indexing uses `QDRANT_URL`, `QDRANT_COLLECTION`, `DOCUMENT_CHUNK_SIZE`,
 `DOCUMENT_CHUNK_OVERLAP`, and `DOCUMENT_CHUNK_STRATEGY_VERSION`. The default chunk
 strategy is `paragraph-v1`.
+
+Production deployment keeps the AI server private on the runtime network. Set
+`BE_BASE_URL` to the internal BE address and use `/api/v1/health/ready` for smoke
+tests. The readiness endpoint checks Qdrant and, when enabled, Redis and RabbitMQ.
+It intentionally does not call paid external LLM APIs.
 
 For local deterministic minutes testing without Gemini, set:
 
