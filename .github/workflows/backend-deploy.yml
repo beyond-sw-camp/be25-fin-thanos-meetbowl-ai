@@ -130,7 +130,7 @@ jobs:
           ssh-keyscan "$SSH_HOST" >> ~/.ssh/known_hosts
 
           ssh -i ~/.ssh/deploy_key "$SSH_USER@$SSH_HOST" \
-            "DEPLOY_PATH='$DEPLOY_PATH' AWS_REGION='$AWS_REGION' ECR_REPOSITORY='$ECR_REPOSITORY' IMAGE_TAG='$IMAGE_TAG' bash -s" <<'EOF'
+            "DEPLOY_PATH='$DEPLOY_PATH' AWS_REGION=ap-southeast-2 ECR_REPOSITORY='$ECR_REPOSITORY' IMAGE_TAG='$IMAGE_TAG' bash -s" <<'EOF'
           set -euo pipefail
 
           cd "$DEPLOY_PATH"
