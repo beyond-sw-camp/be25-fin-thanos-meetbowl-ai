@@ -15,7 +15,7 @@ concurrency:
 
 env:
   PYTHON_VERSION: "3.12"
-  AWS_REGION: ap-southeast-2
+  AWS_REGION: ap-northeast-2
   ECR_REPOSITORY: meetbowl-ai
   IMAGE_TAG: ${{ github.sha }}
 
