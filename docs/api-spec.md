@@ -212,6 +212,10 @@ window를 구성한다.
 필터를 통과한 후보가 없거나 관련도 threshold, 근거 유형, cooldown 또는 중복 제거 기준을
 통과하지 못하면 결과 이벤트를 발행하지 않는다.
 
+실시간 회의 화면에서 즉시 읽을 수 있도록 `message`는 120자 이하의 결론형 문장으로
+생성하고 회의록 원문을 직접 붙이지 않는다. `sources`는 관련도 순 최대 2건만 포함하며,
+각 `snippet`은 공백을 정규화한 뒤 120자 이하로 축약한다.
+
 ### Result Event Payload
 
 ```json
@@ -227,7 +231,7 @@ window를 구성한다.
     "meetingId": "uuid",
     "sessionId": "uuid",
     "feedbackType": "DECISION_REMINDER",
-    "message": "이 안건은 지난 회의에서 이미 A안으로 결정된 이력이 있습니다.",
+    "message": "2026-05-20 회의에서 이 안건이 이미 결정되었습니다.",
     "sources": [
       {
         "minutesId": "uuid",

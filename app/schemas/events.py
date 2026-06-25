@@ -92,8 +92,10 @@ class MeetingFeedbackGeneratedPayload(UtcDatetimeModel):
     meeting_id: UUID
     session_id: UUID
     feedback_type: FeedbackType
-    message: str = Field(min_length=1, max_length=500)
-    sources: list[FeedbackCandidate] = Field(default_factory=list, min_length=1)
+    message: str = Field(min_length=1, max_length=120)
+    sources: list[FeedbackCandidate] = Field(
+        default_factory=list, min_length=1, max_length=2
+    )
     audience_user_ids: list[UUID] = Field(default_factory=list, min_length=1)
     from_sequence: int = Field(ge=0)
     to_sequence: int = Field(ge=0)
