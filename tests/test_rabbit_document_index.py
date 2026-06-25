@@ -6,12 +6,14 @@ BE의 `document.index.requested` 이벤트(EventEnvelope) → 소비자 → tran
 
 import asyncio
 import json
+import logging
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID, uuid4
 
 import httpx
 
+from app.core.errors import DocumentIndexStageError, ProviderUnavailableError
 from app.events.idempotency import InMemoryEventTracker
 from app.events.rabbit import DocumentIndexEventProcessor
 from app.providers.fake_embedding import FakeEmbeddingProvider
@@ -138,17 +140,20 @@ def test_duplicate_index_event_is_acked_without_reindexing() -> None:
     assert len(requests) == after_first
 
 
-def test_invalid_message_is_rejected_to_dlq() -> None:
+def test_invalid_message_is_rejected_to_dlq(caplog) -> None:
     async def run() -> FakeMessage:
         async with httpx.AsyncClient(transport=httpx.MockTransport(_qdrant_handler([]))) as client:
             message = FakeMessage(b"not-json")
             await _processor(client, InMemoryEventTracker()).process(message)
             return message
 
-    message = asyncio.run(run())
+    with caplog.at_level(logging.ERROR, logger="uvicorn.error"):
+        message = asyncio.run(run())
 
     assert message.acked == 0
     assert message.requeues == [False]
+    assert "document index event envelope validation failed" in caplog.text
+    assert "destination=dlq" in caplog.text
 
 
 def test_unsupported_event_type_is_rejected_to_dlq() -> None:
@@ -167,7 +172,36 @@ def test_unsupported_event_type_is_rejected_to_dlq() -> None:
     assert message.requeues == [False]
 
 
-def test_indexing_failure_requeues_until_max_then_rejects() -> None:
+def test_indexing_failure_logs_stage_and_requeues(caplog) -> None:
+    class FailingWorkflow:
+        async def execute(self, _: Any) -> Any:
+            raise DocumentIndexStageError(
+                "s3_download",
+                ProviderUnavailableError("S3에서 파일을 다운로드하지 못했습니다."),
+            )
+
+    event = index_requested_event(document_id=uuid4(), owner_user_id=uuid4())
+    processor = DocumentIndexEventProcessor(
+        workflow=FailingWorkflow(),
+        tracker=InMemoryEventTracker(),
+        max_retries=3,
+    )
+
+    with caplog.at_level(logging.ERROR, logger="uvicorn.error"):
+        message = FakeMessage(event.model_dump_json(by_alias=True).encode())
+        asyncio.run(processor.process(message))
+
+    assert message.requeues == [True]
+    assert str(event.event_id) in caplog.text
+    assert event.payload["documentId"] in caplog.text
+    assert "stage=s3_download" in caplog.text
+    assert "code=AI_PROVIDER_UNAVAILABLE" in caplog.text
+    assert "retryCount=1" in caplog.text
+    assert "destination=requeue" in caplog.text
+    assert "S3에서 파일을 다운로드하지 못했습니다." in caplog.text
+
+
+def test_indexing_failure_requeues_until_max_then_logs_dlq(caplog) -> None:
     class FailingWorkflow:
         async def execute(self, _: Any) -> Any:
             raise RuntimeError("Qdrant down")
@@ -180,10 +214,15 @@ def test_indexing_failure_requeues_until_max_then_rejects() -> None:
     event = index_requested_event(document_id=uuid4(), owner_user_id=uuid4())
     requeues: list[bool] = []
 
-    for _ in range(4):
-        message = FakeMessage(event.model_dump_json(by_alias=True).encode())
-        asyncio.run(processor.process(message))
-        requeues.extend(message.requeues)
+    with caplog.at_level(logging.ERROR, logger="uvicorn.error"):
+        for _ in range(4):
+            message = FakeMessage(event.model_dump_json(by_alias=True).encode())
+            asyncio.run(processor.process(message))
+            requeues.extend(message.requeues)
 
     # 일시 실패는 3번 재시도 후 DLQ로 보낸다.
     assert requeues == [True, True, True, False]
+    assert "stage=unknown" in caplog.text
+    assert "retryCount=4" in caplog.text
+    assert "destination=dlq" in caplog.text
+    assert "errorType=RuntimeError" in caplog.text

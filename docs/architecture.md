@@ -355,6 +355,11 @@ meetbowl-fe
 기준을 통과하지 못하면 `meeting.feedback.generated`를 발행하지 않는다. 피드백이 없다는
 별도 결과도 사용자 화면에 전달하지 않는다.
 
+배포 환경의 E2E 전달 경로 검증에는 `FEEDBACK_DEMO_MODE=true`를 임시로 사용할 수 있다.
+이 모드는 segment/window, 관련도, 근거 유형, cooldown gate만 완화한다. 조직,
+`allowedUserIds`, 회의록 source type, 현재 회의 제외 조건은 우회하지 않는다. 검증 후에는
+반드시 `false`로 복구한다.
+
 `meetbowl-ai`는 사용자 화면에 직접 피드백을 전송하지 않는다. 피드백 결과는 Redis Stream으로 `meetbowl-stt`에 전달하고, `meetbowl-stt`가 LiveKit DataChannel로 회의 참여자에게 전달한다.
 
 ---

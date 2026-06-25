@@ -159,7 +159,12 @@ class DocumentIndexEventProcessor:
     async def process(self, message: IncomingMessage) -> None:
         try:
             envelope = EventEnvelope.model_validate_json(message.body)
-        except ValidationError:
+        except ValidationError as exc:
+            # 파일명, storageKey, 본문이 들어 있는 원문 payload는 로그에 남기지 않는다.
+            logger.error(
+                "document index event envelope validation failed errorType=%s destination=dlq",
+                exc.__class__.__name__,
+            )
             await message.reject(requeue=False)
             return
 
@@ -172,23 +177,68 @@ class DocumentIndexEventProcessor:
             command = index_command_from_event(envelope)
             await self._workflow.execute(command)
         except AiError as exc:
-            # 계약 오류나 권한 오류는 재시도해도 바뀌지 않으므로 DLQ로 보내고,
-            # provider/Qdrant 같은 일시 장애만 재큐잉한다.
-            if exc.retryable and self._tracker.increment_retry(envelope.event_id) <= self._max_retries:
-                await message.reject(requeue=True)
-            else:
-                await message.reject(requeue=False)
+            await self._handle_failure(
+                message=message,
+                envelope=envelope,
+                code=exc.code,
+                stage=getattr(exc, "stage", "validation"),
+                reason=exc.message,
+                retryable=exc.retryable,
+                error_type=exc.__class__.__name__,
+            )
             return
-        except Exception:
-            if self._tracker.increment_retry(envelope.event_id) <= self._max_retries:
-                await message.reject(requeue=True)
-            else:
-                await message.reject(requeue=False)
+        except Exception as exc:
+            await self._handle_failure(
+                message=message,
+                envelope=envelope,
+                code="AI_DOCUMENT_INDEX_UNEXPECTED",
+                stage="unknown",
+                reason="예상하지 못한 문서 색인 오류가 발생했습니다.",
+                retryable=True,
+                error_type=exc.__class__.__name__,
+            )
             return
 
         # Qdrant 교체 저장까지 끝난 뒤에만 ACK해 승인된 회의록 색인 요청이 유실되지 않게 한다.
         self._tracker.mark_completed(envelope.event_id)
         await message.ack()
+
+    async def _handle_failure(
+        self,
+        *,
+        message: IncomingMessage,
+        envelope: EventEnvelope,
+        code: str,
+        stage: str,
+        reason: str,
+        retryable: bool,
+        error_type: str,
+    ) -> None:
+        retry_count = (
+            self._tracker.increment_retry(envelope.event_id) if retryable else 0
+        )
+        requeue = retryable and retry_count <= self._max_retries
+        destination = "requeue" if requeue else "dlq"
+
+        # 본문·파일명·storageKey는 제외하고 운영 추적에 필요한 식별자와 실패 단계만 기록한다.
+        logger.error(
+            "document indexing failed eventId=%s documentId=%s documentType=%s "
+            "stage=%s code=%s retryable=%s retryCount=%s maxRetries=%s "
+            "destination=%s errorType=%s reason=%s",
+            envelope.event_id,
+            envelope.payload.get("documentId"),
+            envelope.payload.get("documentType"),
+            stage,
+            code,
+            retryable,
+            retry_count,
+            self._max_retries,
+            destination,
+            error_type,
+            reason,
+            exc_info=True,
+        )
+        await message.reject(requeue=requeue)
 
 
 class DocumentIndexRemovedEventProcessor:
