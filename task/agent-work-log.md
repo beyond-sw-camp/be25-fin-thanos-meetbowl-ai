@@ -44,3 +44,12 @@
 - 보안: 이벤트 본문, 파일명, storageKey, API Key와 전체 payload는 로그에 남기지 않는다. S3 Adapter 오류 메시지에서도 storageKey를 제거했다.
 - 제외 범위: RabbitMQ 재시도 횟수, DLQ 정책, 임베딩·Qdrant 저장 방식은 변경하지 않았다.
 - 검증: 문서 색인 관련 테스트 11개, AI 전체 테스트 106개, Python compileall 및 `git diff --check` 통과.
+
+## 2026-06-25 회의록 Transcript sequence 계약 정합성 수정
+
+- 목적: BE의 회의록 생성 Context가 첫 Final Transcript segment의 `sequence`를 0으로 반환할 때 AI가 `AI_CONTEXT_INVALID`로 거부하던 문제를 해결한다.
+- 변경 근거: STT는 회의 내 sequence를 0부터 발급하고 BE 도메인도 0 이상을 유효한 값으로 저장한다.
+- 변경 파일: `app/schemas/minutes.py`, `tests/test_http_minutes_context_loader.py`.
+- 변경 동작: 회의록용 `TranscriptSegment.sequence` 검증 범위를 1 이상에서 0 이상으로 변경해 BE가 전달한 원본 sequence를 변환 없이 사용한다.
+- 제외 범위: STT/BE sequence 발급 방식, 실시간 피드백 계약, 회의록 evidence 매핑 로직은 변경하지 않았다.
+- 검증: 회의록 Context·품질 테스트 13개, AI 전체 테스트 111개, Python compileall 및 `git diff --check` 통과.
