@@ -64,6 +64,15 @@ RUN_RAG_E2E=true uv run pytest -q tests/test_rag_e2e.py -s
 
 ### Manual realtime feedback check
 
+For an end-to-end check on a deployed server, temporarily set
+`FEEDBACK_DEMO_MODE=true` and redeploy the AI container. Demo mode evaluates every
+finalized segment, uses a `0.45` cosine threshold, permits a semantic-match fallback,
+and shortens duplicate feedback cooldown to 10 seconds. It does not bypass
+`organizationId`, `allowedUserIds`, source type, or current-meeting exclusion filters.
+At least one approved historical meeting-minutes document visible to every current
+authenticated participant must already be indexed. Restore
+`FEEDBACK_DEMO_MODE=false` after the check.
+
 To inspect only the AI feedback result without BE, STT, LiveKit, or MariaDB, start the
 API with Redis feedback enabled and deterministic embeddings in a dedicated collection:
 

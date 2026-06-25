@@ -1,3 +1,4 @@
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -13,12 +14,15 @@ from app.core.errors import AiError
 from app.events.rabbit import RabbitRuntime
 from app.schemas.api import ErrorBody, FailureResponse
 
+logger = logging.getLogger("uvicorn.error")
+
 
 def create_app(
     *, settings: Settings | None = None, container: Container | None = None
 ) -> FastAPI:
     resolved_settings = settings or get_settings()
     resolved_container = container or build_container(resolved_settings)
+    feedback_runtime_settings = resolved_settings.feedback_runtime_settings()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -34,15 +38,20 @@ def create_app(
             )
             await rabbit_runtime.start()
         if resolved_settings.redis_feedback_enabled:
+            if resolved_settings.feedback_demo_mode:
+                logger.warning(
+                    "feedback demo mode enabled: relaxed gates are active; "
+                    "permission and source filters remain enforced"
+                )
             processor = FeedbackEventProcessor(
                 workflow=resolved_container.meeting_feedback_workflow,
                 publisher=None,
                 max_segments=resolved_settings.feedback_window_max_segments,
                 max_window_seconds=resolved_settings.feedback_window_max_seconds,
-                min_segments=resolved_settings.feedback_min_segments,
-                min_window_chars=resolved_settings.feedback_min_window_chars,
-                trigger_interval_seconds=resolved_settings.feedback_trigger_interval_seconds,
-                cooldown_seconds=resolved_settings.feedback_cooldown_seconds,
+                min_segments=feedback_runtime_settings.min_segments,
+                min_window_chars=feedback_runtime_settings.min_window_chars,
+                trigger_interval_seconds=feedback_runtime_settings.trigger_interval_seconds,
+                cooldown_seconds=feedback_runtime_settings.cooldown_seconds,
                 state_ttl_seconds=resolved_settings.feedback_state_ttl_seconds,
             )
             redis_feedback_runtime = RedisFeedbackRuntime(

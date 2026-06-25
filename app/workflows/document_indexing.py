@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from uuid import NAMESPACE_URL, uuid5
 
-from app.core.errors import AiError
+from app.core.errors import AiError, DocumentIndexStageError
 from app.pipelines.chunking import split_document_into_chunks
 from app.ports.embedding import EmbeddingPort, EmbeddingRequest
 from app.ports.extraction import FileExtractionRequest, FileTextExtractorPort
@@ -49,14 +49,20 @@ class DocumentIndexingWorkflow:
                     "파일 색인을 위한 저장소/추출기가 구성되지 않았습니다.",
                     status_code=500,
                 )
-            data = await self._file_storage_port.download(storage_key)
-            extraction = await self._file_text_extractor.extract(
-                FileExtractionRequest(
-                    content=data,
-                    content_type=command.metadata.content_type or "",
-                    filename=command.title,
+            try:
+                data = await self._file_storage_port.download(storage_key)
+            except AiError as exc:
+                raise DocumentIndexStageError("s3_download", exc) from exc
+            try:
+                extraction = await self._file_text_extractor.extract(
+                    FileExtractionRequest(
+                        content=data,
+                        content_type=command.metadata.content_type or "",
+                        filename=command.title,
+                    )
                 )
-            )
+            except AiError as exc:
+                raise DocumentIndexStageError("text_extraction", exc) from exc
             return extraction.text.strip()
         return ""
 
@@ -90,12 +96,15 @@ class DocumentIndexingWorkflow:
 
         # chunk 수와 임베딩 수가 어긋나면 어떤 본문이 어떤 벡터인지 매핑할 수 없으므로
         # 부분 성공으로 진행하지 않고 전체 요청을 재시도 대상으로 돌린다.
-        embedding_result = await self._embedding_port.embed(
-            EmbeddingRequest(
-                texts=[chunk.embedding_text for chunk in chunks],
-                model_profile=self._model_profile,
+        try:
+            embedding_result = await self._embedding_port.embed(
+                EmbeddingRequest(
+                    texts=[chunk.embedding_text for chunk in chunks],
+                    model_profile=self._model_profile,
+                )
             )
-        )
+        except AiError as exc:
+            raise DocumentIndexStageError("embedding", exc) from exc
         if len(embedding_result.embeddings) != len(chunks):
             raise AiError(
                 "AI_DOCUMENT_INDEX_FAILED",
@@ -155,13 +164,16 @@ class DocumentIndexingWorkflow:
         ]
         # Qdrant에는 sourceId 단위로 기존 포인트를 먼저 지우고 새 포인트 집합으로 교체한다.
         # 본문 길이가 줄어든 재색인에서 오래된 chunk가 남는 문제를 막기 위한 전략이다.
-        await self._vector_store_port.replace_document(
-            ReplaceDocumentRequest(
-                document_id=str(command.document_id),
-                vector_size=embedding_result.dimensions,
-                points=points,
+        try:
+            await self._vector_store_port.replace_document(
+                ReplaceDocumentRequest(
+                    document_id=str(command.document_id),
+                    vector_size=embedding_result.dimensions,
+                    points=points,
+                )
             )
-        )
+        except AiError as exc:
+            raise DocumentIndexStageError("qdrant", exc) from exc
         return DocumentIndexingResult(
             document_id=command.document_id,
             document_type=command.document_type,
