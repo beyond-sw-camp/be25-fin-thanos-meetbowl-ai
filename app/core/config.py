@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from urllib.parse import quote
 
-from pydantic import NonNegativeInt, PositiveInt, model_validator
+from pydantic import NonNegativeInt, PositiveInt, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.core.model_profiles import EmbeddingModelProfile, GenerationModelProfile
@@ -132,6 +132,13 @@ class Settings(BaseSettings):
     # 배포 환경에서 E2E 피드백 전달 경로를 쉽게 검증하기 위한 임시 모드다.
     # 권한 필터, 과거 회의록 근거, 현재 회의 제외 조건은 그대로 유지한다.
     feedback_demo_mode: bool = False
+
+    @field_validator("s3_endpoint", mode="before")
+    @classmethod
+    def normalize_blank_s3_endpoint(cls, value: object) -> object:
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
     @model_validator(mode="after")
     def validate_unique_model_profiles(self) -> "Settings":

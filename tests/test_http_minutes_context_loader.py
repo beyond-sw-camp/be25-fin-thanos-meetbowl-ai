@@ -33,16 +33,16 @@ def test_loads_final_transcript_context_from_be() -> None:
                     ],
                     "segments": [
                         {
-                            "segmentId": "segment-1",
-                            "sequence": 1,
+                            "segmentId": "segment-0",
+                            "sequence": 0,
                             "language": "KO",
                             "sourceText": "첫 번째 확정 발화",
                             "startedAtMs": 0,
                             "endedAtMs": 500,
                         },
                         {
-                            "segmentId": "segment-2",
-                            "sequence": 2,
+                            "segmentId": "segment-1",
+                            "sequence": 1,
                             "language": "KO",
                             "sourceText": "두 번째 확정 발화",
                             "startedAtMs": 600,
@@ -77,7 +77,7 @@ def test_loads_final_transcript_context_from_be() -> None:
 
     context = asyncio.run(run())
     assert context.raw_transcript == "첫 번째 확정 발화\n두 번째 확정 발화"
-    assert [segment.sequence for segment in context.segments] == [1, 2]
+    assert [segment.sequence for segment in context.segments] == [0, 1]
     assert [segment.source_text for segment in context.segments] == [
         "첫 번째 확정 발화",
         "두 번째 확정 발화",
