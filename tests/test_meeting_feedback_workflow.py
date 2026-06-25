@@ -127,6 +127,7 @@ def test_builds_decision_feedback_with_delivery_scope() -> None:
     assert result.meeting_id == command.meeting_id
     assert result.session_id == command.session_id
     assert result.feedback_type == "DECISION_REMINDER"
+    assert result.message == "2026-06-10 회의에서 이 안건이 이미 결정되었습니다."
     assert result.audience_user_ids == sorted([participant_a, participant_b], key=str)
     assert result.from_sequence == 10
     assert result.to_sequence == 11
@@ -157,7 +158,7 @@ def test_demo_gate_allows_semantically_retrieved_candidate_without_keyword_overl
     assert result.feedback_type == "DUPLICATE_DISCUSSION"
 
 
-def test_limits_long_source_excerpt_to_result_schema() -> None:
+def test_compacts_feedback_message_and_source_snippet() -> None:
     result = asyncio.run(
         _workflow([_candidate(snippet=f"결제 승인 확정 {('상세 내용 ' * 300)}")]).execute(
             _command()
@@ -165,4 +166,19 @@ def test_limits_long_source_excerpt_to_result_schema() -> None:
     )
 
     assert result is not None
-    assert len(result.message) <= 500
+    assert len(result.message) <= 120
+    assert "근거:" not in result.message
+    assert len(result.sources[0].snippet) <= 120
+    assert result.sources[0].snippet.endswith("...")
+
+
+def test_limits_feedback_sources_to_two_items() -> None:
+    candidates = [
+        _candidate(snippet=f"결제 승인 정책을 확정한 기록 {index}")
+        for index in range(3)
+    ]
+
+    result = asyncio.run(_workflow(candidates).execute(_command()))
+
+    assert result is not None
+    assert len(result.sources) == 2

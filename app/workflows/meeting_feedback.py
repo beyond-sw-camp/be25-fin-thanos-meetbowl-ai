@@ -15,6 +15,9 @@ from app.schemas.feedback import (
 # Uvicorn 기본 로깅 설정에서도 실시간 피드백 처리 결과가 INFO 수준으로 보이게 한다.
 logger = logging.getLogger("uvicorn.error")
 
+_MAX_FEEDBACK_SOURCES = 2
+_MAX_SOURCE_SNIPPET_LENGTH = 120
+
 
 class MeetingFeedbackRetriever(Protocol):
     async def search(
@@ -97,7 +100,12 @@ class MeetingFeedbackWorkflow:
             )
             return None
         top_candidate, feedback_type = qualified_candidates[0]
-        sources = [candidate for candidate, _ in qualified_candidates[:3]]
+        # 검색·분류에는 원문 snippet을 사용하되 화면 전달 payload에는 짧은 근거만 포함한다.
+        # 실시간 피드백은 회의 중 즉시 읽는 알림이므로 긴 회의록 본문을 그대로 싣지 않는다.
+        sources = [
+            _compact_source(candidate)
+            for candidate, _ in qualified_candidates[:_MAX_FEEDBACK_SOURCES]
+        ]
         message = _render_message(feedback_type, top_candidate)
         sequences = [segment.sequence for segment in command.transcript_window]
         return MeetingFeedbackResult(
@@ -154,22 +162,21 @@ def _meaningful_terms(text: str) -> set[str]:
 
 
 def _render_message(feedback_type: FeedbackType, source: FeedbackCandidate) -> str:
-    excerpt = _source_excerpt(source.snippet)
     if feedback_type == "RESOLVED_TOPIC":
-        return (
-            f"유사한 이슈가 {source.meeting_date} 회의에서 이미 해결된 기록이 있습니다. "
-            f"근거: {excerpt}"
-        )
+        return f"{source.meeting_date} 회의에서 유사한 이슈가 이미 해결되었습니다."
     if feedback_type == "DECISION_REMINDER":
-        return (
-            f"이 안건은 {source.meeting_date} 회의에서 이미 결정된 이력이 있습니다. "
-            f"근거: {excerpt}"
-        )
-    return f"비슷한 논의가 {source.meeting_date} 회의록에 있습니다. 근거: {excerpt}"
+        return f"{source.meeting_date} 회의에서 이 안건이 이미 결정되었습니다."
+    return f"{source.meeting_date} 회의에 비슷한 논의가 있습니다."
 
 
-def _source_excerpt(snippet: str, max_length: int = 350) -> str:
-    normalized = " ".join(snippet.split())
+def _compact_source(candidate: FeedbackCandidate) -> FeedbackCandidate:
+    return candidate.model_copy(
+        update={"snippet": _truncate_text(candidate.snippet, _MAX_SOURCE_SNIPPET_LENGTH)}
+    )
+
+
+def _truncate_text(text: str, max_length: int) -> str:
+    normalized = " ".join(text.split())
     if len(normalized) <= max_length:
         return normalized
     return f"{normalized[: max_length - 3]}..."
