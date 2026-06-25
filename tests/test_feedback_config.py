@@ -29,3 +29,15 @@ def test_demo_feedback_runtime_settings_relax_only_generation_gates() -> None:
     assert runtime.cooldown_seconds == 10
     assert runtime.score_threshold == 0.45
     assert runtime.allow_semantic_fallback is True
+
+
+def test_blank_s3_endpoint_is_normalized_to_none() -> None:
+    settings = Settings(s3_endpoint="")
+
+    assert settings.s3_endpoint is None
+
+
+def test_whitespace_s3_endpoint_is_normalized_to_none() -> None:
+    settings = Settings(s3_endpoint="   ")
+
+    assert settings.s3_endpoint is None

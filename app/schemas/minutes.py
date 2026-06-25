@@ -20,7 +20,8 @@ class AgendaItem(ApiModel):
 
 class TranscriptSegment(ApiModel):
     segment_id: str | None = None
-    sequence: int = Field(ge=1)
+    # STT와 BE가 회의 내 첫 segment를 0으로 부여하므로 원본 sequence를 그대로 수용한다.
+    sequence: int = Field(ge=0)
     language: str | None = None
     source_text: str = Field(min_length=1)
     started_at_ms: int | None = None
