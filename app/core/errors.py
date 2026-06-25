@@ -51,3 +51,16 @@ class DocumentIndexFailedError(AiError):
             retryable=retryable,
             status_code=503 if retryable else 500,
         )
+
+
+class DocumentIndexStageError(AiError):
+    """문서 색인의 어느 외부 처리 단계에서 실패했는지 consumer까지 전달한다."""
+
+    def __init__(self, stage: str, cause: AiError) -> None:
+        super().__init__(
+            cause.code,
+            cause.message,
+            retryable=cause.retryable,
+            status_code=cause.status_code,
+        )
+        self.stage = stage

@@ -31,9 +31,8 @@ class S3FileStorage:
         try:
             return await asyncio.to_thread(self._download_sync, storage_key)
         except Exception as exc:
-            raise ProviderUnavailableError(
-                f"S3에서 파일을 다운로드하지 못했습니다: {storage_key}"
-            ) from exc
+            # storage key는 사용자/워크스페이스 식별자를 포함할 수 있어 오류 메시지와 로그에 노출하지 않는다.
+            raise ProviderUnavailableError("S3에서 파일을 다운로드하지 못했습니다.") from exc
 
     def _download_sync(self, storage_key: str) -> bytes:
         response = self._get_client().get_object(Bucket=self._bucket, Key=storage_key)

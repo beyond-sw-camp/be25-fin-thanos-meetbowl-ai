@@ -35,3 +35,12 @@
 - 보안: 회의 원문, 전체 이벤트 payload, API Key, 내부 토큰은 로그에 남기지 않는다.
 - 제외 범위: 재시도 횟수·간격, DLQ 정책, 회의록 생성 로직과 Provider 설정은 변경하지 않았다. 실제 운영 실패 원인은 변경 배포 후 DLQ 메시지를 재처리하여 로그로 확인해야 한다.
 - 검증: Rabbit 회의록 테스트 6개, AI 전체 테스트 105개 통과, Python compileall 및 `git diff --check` 통과. Ruff는 현재 가상환경에 설치되어 있지 않아 실행하지 못했다.
+
+## 2026-06-25 RabbitMQ 문서 색인 실패 관측 로그 추가
+
+- 목적: `document.index.requested`가 `dlq.ai.index.document`로 이동할 때 S3 다운로드, 텍스트 추출, 임베딩, Qdrant 중 어느 단계에서 실패했는지 AI 서버 로그로 확인한다.
+- 변경 파일: `app/core/errors.py`, `app/events/rabbit.py`, `app/providers/s3_file_storage.py`, `app/workflows/document_indexing.py`, `tests/test_rabbit_document_index.py`.
+- 변경 동작: 문서 색인 외부 처리 실패를 `s3_download`, `text_extraction`, `embedding`, `qdrant` 단계로 구분한다. Consumer는 `eventId`, `documentId`, `documentType`, 오류 코드, 재시도 여부·횟수, 최종 목적지(`requeue`/`dlq`)와 실패 사유를 Uvicorn 오류 로그에 기록한다.
+- 보안: 이벤트 본문, 파일명, storageKey, API Key와 전체 payload는 로그에 남기지 않는다. S3 Adapter 오류 메시지에서도 storageKey를 제거했다.
+- 제외 범위: RabbitMQ 재시도 횟수, DLQ 정책, 임베딩·Qdrant 저장 방식은 변경하지 않았다.
+- 검증: 문서 색인 관련 테스트 11개, AI 전체 테스트 106개, Python compileall 및 `git diff --check` 통과.
