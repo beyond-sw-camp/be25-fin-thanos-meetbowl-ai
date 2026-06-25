@@ -69,12 +69,18 @@ def _command(
     )
 
 
-def _workflow(candidates: list[FeedbackCandidate]) -> MeetingFeedbackWorkflow:
+def _workflow(
+    candidates: list[FeedbackCandidate],
+    *,
+    score_threshold: float = 0.78,
+    allow_semantic_fallback: bool = False,
+) -> MeetingFeedbackWorkflow:
     return MeetingFeedbackWorkflow(
         embedding_port=StubEmbeddingPort(),
         retriever=StubRetriever(candidates),
         query_model_profile="query-embedding",
-        score_threshold=0.78,
+        score_threshold=score_threshold,
+        allow_semantic_fallback=allow_semantic_fallback,
     )
 
 
@@ -131,6 +137,19 @@ def test_builds_duplicate_feedback_only_with_meaningful_shared_terms() -> None:
     result = asyncio.run(
         _workflow(
             [_candidate(snippet="결제 승인 정책과 자동 승인 기준을 검토했습니다")]
+        ).execute(_command())
+    )
+
+    assert result is not None
+    assert result.feedback_type == "DUPLICATE_DISCUSSION"
+
+
+def test_demo_gate_allows_semantically_retrieved_candidate_without_keyword_overlap() -> None:
+    result = asyncio.run(
+        _workflow(
+            [_candidate(snippet="사내 행사 장소와 식사 메뉴를 검토했습니다", score=0.5)],
+            score_threshold=0.45,
+            allow_semantic_fallback=True,
         ).execute(_command())
     )
 
