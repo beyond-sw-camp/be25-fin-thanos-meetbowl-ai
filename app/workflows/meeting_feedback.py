@@ -34,11 +34,13 @@ class MeetingFeedbackWorkflow:
         retriever: MeetingFeedbackRetriever,
         query_model_profile: str,
         score_threshold: float,
+        allow_semantic_fallback: bool = False,
     ) -> None:
         self._embedding_port = embedding_port
         self._retriever = retriever
         self._query_model_profile = query_model_profile
         self._score_threshold = score_threshold
+        self._allow_semantic_fallback = allow_semantic_fallback
 
     async def execute(
         self, command: MeetingFeedbackCommand
@@ -74,21 +76,24 @@ class MeetingFeedbackWorkflow:
                 command.meeting_id,
                 command.session_id,
             )
-        qualified_candidates = [
-            (candidate, feedback_type)
-            for candidate in candidates
-            if candidate.score >= self._score_threshold
-            if (feedback_type := _classify_feedback_type(query, candidate.snippet))
-            is not None
-        ]
+        qualified_candidates: list[tuple[FeedbackCandidate, FeedbackType]] = []
+        for candidate in candidates:
+            if candidate.score < self._score_threshold:
+                continue
+            feedback_type = _classify_feedback_type(query, candidate.snippet)
+            if feedback_type is None and self._allow_semantic_fallback:
+                feedback_type = "DUPLICATE_DISCUSSION"
+            if feedback_type is not None:
+                qualified_candidates.append((candidate, feedback_type))
         if not qualified_candidates:
             logger.info(
                 "meeting feedback skipped: gate rejected candidates meeting_id=%s "
-                "session_id=%s scores=%s threshold=%s",
+                "session_id=%s scores=%s threshold=%s semantic_fallback=%s",
                 command.meeting_id,
                 command.session_id,
                 [round(candidate.score, 4) for candidate in candidates],
                 self._score_threshold,
+                self._allow_semantic_fallback,
             )
             return None
         top_candidate, feedback_type = qualified_candidates[0]

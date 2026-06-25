@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from functools import lru_cache
 from urllib.parse import quote
 
@@ -5,6 +6,16 @@ from pydantic import PositiveInt, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.core.model_profiles import EmbeddingModelProfile, GenerationModelProfile
+
+
+@dataclass(frozen=True)
+class FeedbackRuntimeSettings:
+    min_segments: int
+    min_window_chars: int
+    trigger_interval_seconds: int
+    cooldown_seconds: int
+    score_threshold: float
+    allow_semantic_fallback: bool
 
 
 class Settings(BaseSettings):
@@ -115,6 +126,9 @@ class Settings(BaseSettings):
     feedback_state_ttl_seconds: int = 300
     feedback_score_threshold: float = 0.78
     feedback_candidate_limit: int = 3
+    # 배포 환경에서 E2E 피드백 전달 경로를 쉽게 검증하기 위한 임시 모드다.
+    # 권한 필터, 과거 회의록 근거, 현재 회의 제외 조건은 그대로 유지한다.
+    feedback_demo_mode: bool = False
 
     @model_validator(mode="after")
     def validate_unique_model_profiles(self) -> "Settings":
@@ -161,6 +175,25 @@ class Settings(BaseSettings):
                 model_name=self.query_expansion_model,
                 temperature=0.0,
             ),
+        )
+
+    def feedback_runtime_settings(self) -> FeedbackRuntimeSettings:
+        if self.feedback_demo_mode:
+            return FeedbackRuntimeSettings(
+                min_segments=1,
+                min_window_chars=1,
+                trigger_interval_seconds=0,
+                cooldown_seconds=10,
+                score_threshold=0.45,
+                allow_semantic_fallback=True,
+            )
+        return FeedbackRuntimeSettings(
+            min_segments=self.feedback_min_segments,
+            min_window_chars=self.feedback_min_window_chars,
+            trigger_interval_seconds=self.feedback_trigger_interval_seconds,
+            cooldown_seconds=self.feedback_cooldown_seconds,
+            score_threshold=self.feedback_score_threshold,
+            allow_semantic_fallback=False,
         )
 
     def embedding_model_profiles(self) -> tuple[EmbeddingModelProfile, ...]:

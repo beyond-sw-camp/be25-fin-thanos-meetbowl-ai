@@ -59,6 +59,7 @@ class Container:
 
 
 def build_container(settings: Settings) -> Container:
+    feedback_runtime_settings = settings.feedback_runtime_settings()
     generation_routes = {
         profile.name: _build_structured_generation_provider(profile, settings)
         for profile in settings.generation_model_profiles()
@@ -140,7 +141,8 @@ def build_container(settings: Settings) -> Container:
             embedding_port=embedding_port,
             retriever=feedback_retriever,
             query_model_profile=settings.query_embedding_model_profile,
-            score_threshold=settings.feedback_score_threshold,
+            score_threshold=feedback_runtime_settings.score_threshold,
+            allow_semantic_fallback=feedback_runtime_settings.allow_semantic_fallback,
         ),
         qdrant_vector_store=qdrant_vector_store,
     )
