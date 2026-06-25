@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     rabbitmq_document_index_removed_queue: str = "ai.index.document.removed"
     rabbitmq_minutes_generated_routing_key: str = "minutes.generated"
     rabbitmq_max_retries: int = 3
+    rabbitmq_prefetch_count: PositiveInt = 4
+    rabbitmq_retry_base_delay_seconds: float = 2.0
+    rabbitmq_retry_max_delay_seconds: float = 30.0
     rabbitmq_idempotency_ttl_seconds: int = 604800
     redis_feedback_enabled: bool = False
     redis_url: str = "redis://localhost:6379"
@@ -38,6 +41,8 @@ class Settings(BaseSettings):
     minutes_summary_provider: str = "gemini"
     minutes_summary_model: str = "gemini-2.5-flash"
     minutes_summary_temperature: float = 0.2
+    minutes_fallback_provider: str = "openai"
+    minutes_fallback_model: str = "gpt-4.1-mini"
     chatbot_model_profile: str = "chatbot"
     # router = 질의별 분기(기본), single_pass = 검색1회+LLM1회(빠름, 의미검색만), agentic = LLM 툴 루프(느림/비결정적)
     chatbot_mode: str = "router"
