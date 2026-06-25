@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 from typing import Protocol
 
@@ -18,6 +19,8 @@ from app.events.mapper import (
 from app.schemas.events import EventEnvelope
 from app.workflows.document_indexing import DocumentIndexingWorkflow
 from app.workflows.minutes_generation import MinutesGenerationWorkflow
+
+logger = logging.getLogger("uvicorn.error")
 
 
 class IncomingMessage(Protocol):
@@ -63,7 +66,12 @@ class MinutesEventProcessor:
     async def process(self, message: IncomingMessage) -> None:
         try:
             envelope = EventEnvelope.model_validate_json(message.body)
-        except ValidationError:
+        except ValidationError as exc:
+            # 원문 payload는 회의 정보나 기타 민감 데이터를 포함할 수 있으므로 로그에 싣지 않는다.
+            logger.error(
+                "minutes event envelope validation failed errorType=%s",
+                exc.__class__.__name__,
+            )
             await message.reject(requeue=False)
             return
 
@@ -82,13 +90,30 @@ class MinutesEventProcessor:
                 )
             )
         except AiError as exc:
+            logger.error(
+                "minutes generation failed eventId=%s meetingId=%s "
+                "code=%s retryable=%s message=%s",
+                envelope.event_id,
+                envelope.payload.get("meetingId"),
+                exc.code,
+                exc.retryable,
+                exc.message,
+                exc_info=True,
+            )
             await self._handle_failure(
                 message=message,
                 event_id=envelope.event_id,
                 retryable=exc.retryable,
             )
             return
-        except Exception:
+        except Exception as exc:
+            logger.exception(
+                "unexpected minutes generation failure eventId=%s meetingId=%s "
+                "errorType=%s",
+                envelope.event_id,
+                envelope.payload.get("meetingId"),
+                exc.__class__.__name__,
+            )
             await self._handle_failure(
                 message=message,
                 event_id=envelope.event_id,

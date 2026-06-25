@@ -1,6 +1,7 @@
 """회의 종료/재생성 이벤트의 Rabbit 소비·발행 계약을 검증한다."""
 
 import asyncio
+import logging
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID, uuid4
@@ -182,7 +183,7 @@ def test_duplicate_minutes_event_is_acked_without_reprocessing() -> None:
     assert len(publisher.published) == 1
 
 
-def test_retryable_context_failure_waits_then_requeues() -> None:
+def test_retryable_context_failure_waits_then_requeues(caplog) -> None:
     event = meeting_ended_event()
     sleep_calls: list[float] = []
     processor, tracker, _ = _processor(
@@ -190,20 +191,25 @@ def test_retryable_context_failure_waits_then_requeues() -> None:
         sleep_calls=sleep_calls,
     )
 
-    async def run() -> FakeMessage:
-        message = FakeMessage(event.model_dump_json(by_alias=True).encode())
-        await processor.process(message)
-        return message
+    with caplog.at_level(logging.ERROR, logger="uvicorn.error"):
+        async def run() -> FakeMessage:
+            message = FakeMessage(event.model_dump_json(by_alias=True).encode())
+            await processor.process(message)
+            return message
 
-    message = asyncio.run(run())
+        message = asyncio.run(run())
 
     assert message.acked == 0
     assert message.requeues == [True]
     assert tracker.retry_counts[event.event_id] == 1
     assert sleep_calls == [2.0]
+    assert str(event.event_id) in caplog.text
+    assert event.payload["meetingId"] in caplog.text
+    assert "code=AI_CONTEXT_NOT_FOUND" in caplog.text
+    assert "retryable=True" in caplog.text
 
 
-def test_publish_failure_requeues_and_does_not_mark_completed() -> None:
+def test_publish_failure_requeues_and_does_not_mark_completed(caplog) -> None:
     event = meeting_ended_event()
     sleep_calls: list[float] = []
     processor, tracker, _ = _processor(
@@ -211,17 +217,21 @@ def test_publish_failure_requeues_and_does_not_mark_completed() -> None:
         sleep_calls=sleep_calls,
     )
 
-    async def run() -> FakeMessage:
-        message = FakeMessage(event.model_dump_json(by_alias=True).encode())
-        await processor.process(message)
-        return message
+    with caplog.at_level(logging.ERROR, logger="uvicorn.error"):
+        async def run() -> FakeMessage:
+            message = FakeMessage(event.model_dump_json(by_alias=True).encode())
+            await processor.process(message)
+            return message
 
-    message = asyncio.run(run())
+        message = asyncio.run(run())
 
     assert message.acked == 0
     assert message.requeues == [True]
     assert event.event_id not in tracker.completed
     assert sleep_calls == [2.0]
+    assert str(event.event_id) in caplog.text
+    assert event.payload["meetingId"] in caplog.text
+    assert "errorType=RuntimeError" in caplog.text
 
 
 def test_retry_limit_sends_message_to_dlq() -> None:

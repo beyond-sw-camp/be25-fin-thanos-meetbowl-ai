@@ -26,3 +26,12 @@
 - 멱등성: AI 회의록 Consumer의 완료·재시도 상태를 Redis에 7일간 보존한다. 중복 결과가 발행되더라도 BE inbox가 최종 저장을 다시 방어한다.
 - 제외 범위: FE 회의록 편집·승인 연결과 회의록 공유는 변경하지 않았다.
 - 검증: AI 전체 테스트 53개 통과, Python compileall 통과.
+
+## 2026-06-25 RabbitMQ 회의록 생성 실패 관측 로그 추가
+
+- 목적: `meeting.ended`가 `dlq.ai.minutes.generate`로 이동할 때 AI Consumer가 실패 원인을 남기지 않아 운영 장애를 진단할 수 없던 문제를 해결한다.
+- 변경 파일: `app/events/rabbit.py`, `tests/test_rabbit_minutes.py`
+- 변경 동작: 회의록 처리 실패 시 `eventId`, `meetingId`, AI 오류 코드, 재시도 가능 여부와 오류 유형을 Uvicorn 오류 로그에 기록한다. 잘못된 Envelope는 payload 원문 없이 검증 실패 유형만 기록한다.
+- 보안: 회의 원문, 전체 이벤트 payload, API Key, 내부 토큰은 로그에 남기지 않는다.
+- 제외 범위: 재시도 횟수·간격, DLQ 정책, 회의록 생성 로직과 Provider 설정은 변경하지 않았다. 실제 운영 실패 원인은 변경 배포 후 DLQ 메시지를 재처리하여 로그로 확인해야 한다.
+- 검증: Rabbit 회의록 테스트 6개, AI 전체 테스트 105개 통과, Python compileall 및 `git diff --check` 통과. Ruff는 현재 가상환경에 설치되어 있지 않아 실행하지 못했다.
