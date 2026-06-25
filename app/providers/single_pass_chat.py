@@ -13,7 +13,7 @@ from app.providers.pydantic_ai_chat import (
     _KST,
     _accumulate_sources,
     _format_with_citation_numbers,
-    _select_cited_sources,
+    _select_answer_sources,
     _normalize_answer_format,
 )
 from app.rag.qdrant_chat import QdrantChatRetriever
@@ -116,6 +116,7 @@ class SinglePassChatProvider:
         )
         generation_finished_at = time.perf_counter()
         output = result.output
+        answer = _normalize_answer_format(output.answer)
         logger.info(
             "[single-pass] architecture=%s searches=%d kept=%d expansion_ms=%.1f "
             "search_ms=%.1f generation_ms=%.1f total_ms=%.1f input_tokens=%s "
@@ -132,8 +133,12 @@ class SinglePassChatProvider:
             result.reasoning_tokens,
         )
         return ChatResult(
-            answer=_normalize_answer_format(output.answer),
-            sources=_select_cited_sources(accumulated, output.cited_indices),
+            answer=answer,
+            sources=_select_answer_sources(
+                accumulated,
+                output.cited_indices,
+                answer,
+            ),
             model=result.model_name,
             prompt_version=self._prompt_version,
         )
