@@ -51,8 +51,27 @@ class QdrantMeetingFeedbackRetriever:
             result = response.json().get("result", {})
             points = result.get("points", result if isinstance(result, list) else [])
             return self._to_candidates(points)
+        except httpx.HTTPStatusError as exc:
+            response_text = exc.response.text.strip()
+            detail = (
+                f"status={exc.response.status_code}"
+                f", collection={self._qdrant_collection}"
+            )
+            if response_text:
+                detail = f"{detail}, body={response_text[:500]}"
+            raise ProviderUnavailableError(
+                f"Qdrant 피드백 검색에 실패했습니다. {detail}"
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise ProviderUnavailableError(
+                "Qdrant 피드백 검색에 실패했습니다. "
+                f"collection={self._qdrant_collection}, reason={exc}"
+            ) from exc
         except Exception as exc:
-            raise ProviderUnavailableError("Qdrant 피드백 검색에 실패했습니다.") from exc
+            raise ProviderUnavailableError(
+                "Qdrant 피드백 검색에 실패했습니다. "
+                f"collection={self._qdrant_collection}, reason={exc}"
+            ) from exc
         finally:
             if self._http_client is None and "client" in locals():
                 await client.aclose()
