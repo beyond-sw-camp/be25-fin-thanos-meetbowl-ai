@@ -1,5 +1,5 @@
 import logging
-import json
+import time
 from datetime import datetime
 
 from app.ports.embedding_provider import EmbeddingProvider
@@ -13,7 +13,7 @@ from app.providers.pydantic_ai_chat import (
     _KST,
     _accumulate_sources,
     _format_with_citation_numbers,
-    _select_cited_sources,
+    _select_answer_sources,
     _normalize_answer_format,
 )
 from app.rag.qdrant_chat import QdrantChatRetriever
@@ -21,7 +21,6 @@ from app.rag.multi_query_search import search_queries_in_parallel
 from app.rag.query_expansion import QueryExpander
 from app.rag.chat_router import is_architecture_question
 from app.schemas.chat import ChatCommand, ChatResult, GeneratedChatAnswer
-from app.schemas.chat import GeneratedArchitectureAnswer
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -47,6 +46,7 @@ class SinglePassChatProvider:
         candidate_pool: int = 30,
         top_n: int = 10,
         query_expander: QueryExpander | None = None,
+        reasoning_budget: int | None = None,
     ) -> None:
         self._port = structured_generation_port
         self._embedding_provider = embedding_provider
@@ -59,11 +59,14 @@ class SinglePassChatProvider:
         self._candidate_pool = candidate_pool
         self._top_n = top_n
         self._query_expander = query_expander
+        self._reasoning_budget = reasoning_budget
 
     async def answer(self, command: ChatCommand) -> ChatResult:
+        started_at = time.perf_counter()
         search_queries = [command.question]
         if self._query_expander is not None:
             search_queries = await self._query_expander.search_queries(command.question)
+        expansion_finished_at = time.perf_counter()
         sources = await search_queries_in_parallel(
             queries=search_queries,
             command=command,
@@ -74,13 +77,17 @@ class SinglePassChatProvider:
             candidate_pool=self._candidate_pool,
             top_n=self._top_n,
         )
-        logger.info(
-            "[single-pass] query=%r searches=%r kept=%d",
-            command.question,
-            search_queries,
-            len(sources),
-        )
+        search_finished_at = time.perf_counter()
         if not sources:
+            logger.info(
+                "[single-pass] architecture=%s searches=%d kept=0 expansion_ms=%.1f "
+                "search_ms=%.1f total_ms=%.1f",
+                is_architecture_question(command.question),
+                len(search_queries),
+                (expansion_finished_at - started_at) * 1000,
+                (search_finished_at - expansion_finished_at) * 1000,
+                (search_finished_at - started_at) * 1000,
+            )
             return ChatResult(
                 answer="검색 가능한 자료에서 근거를 찾지 못했습니다.",
                 sources=[],
@@ -96,54 +103,42 @@ class SinglePassChatProvider:
             question=command.question,
         )
         architecture_question = is_architecture_question(command.question)
-        response_schema = (
-            GeneratedArchitectureAnswer if architecture_question else GeneratedChatAnswer
-        )
         result = await self._port.generate_structured(
             StructuredGenerationRequest(
                 prompt=prompt,
-                response_schema=response_schema,
+                # 사용자에게 반환하는 계약은 항상 answer + citedIndices다. 설계 답변의
+                # 섹션 구성은 prompt가 담당하며, 특정 주제의 불필요한 필드를 강제하지 않는다.
+                response_schema=GeneratedChatAnswer,
                 model_profile=self._model_profile,
                 temperature=self._temperature,
+                reasoning_budget=self._reasoning_budget,
             )
         )
+        generation_finished_at = time.perf_counter()
         output = result.output
-        if isinstance(output, GeneratedArchitectureAnswer):
-            answer = _format_architecture_answer(output)
-            cited_indices = output.cited_indices
-        else:
-            answer = output.answer
-            cited_indices = output.cited_indices
+        answer = _normalize_answer_format(output.answer)
+        logger.info(
+            "[single-pass] architecture=%s searches=%d kept=%d expansion_ms=%.1f "
+            "search_ms=%.1f generation_ms=%.1f total_ms=%.1f input_tokens=%s "
+            "output_tokens=%s reasoning_tokens=%s",
+            architecture_question,
+            len(search_queries),
+            len(sources),
+            (expansion_finished_at - started_at) * 1000,
+            (search_finished_at - expansion_finished_at) * 1000,
+            (generation_finished_at - search_finished_at) * 1000,
+            (generation_finished_at - started_at) * 1000,
+            result.input_tokens,
+            result.output_tokens,
+            result.reasoning_tokens,
+        )
         return ChatResult(
-            answer=_normalize_answer_format(answer),
-            sources=_select_cited_sources(accumulated, cited_indices),
+            answer=answer,
+            sources=_select_answer_sources(
+                accumulated,
+                output.cited_indices,
+                answer,
+            ),
             model=result.model_name,
             prompt_version=self._prompt_version,
         )
-
-
-def _format_architecture_answer(output: GeneratedArchitectureAnswer) -> str:
-    """구조화된 설계 응답을 사용자용 문서로 결정적으로 렌더링한다."""
-    sections = [
-        f"전체 처리 흐름\n{output.flow}",
-        "구성요소별 책임\n"
-        + "\n".join(
-            f"- {item.name}: {item.responsibility}" for item in output.components
-        ),
-        "Harmony 메시지 구조\n"
-        + "\n".join(
-            f"- {item.role}: {item.purpose}" for item in output.harmony_roles
-        )
-        + f"\n- 포맷: {output.harmony_message_format}",
-        "Safeguard 정책 구조\n"
-        + "\n".join(
-            f"- {item.name}: {item.purpose}"
-            for item in output.safeguard_policy_sections
-        ),
-        "분류 결과 JSON 예시\n```json\n"
-        + json.dumps(output.output_example.model_dump(), ensure_ascii=False, indent=2)
-        + "\n```",
-        f"Meetbowl 적용\n{output.meetbowl_application}",
-        "주의점\n" + "\n".join(f"- {item}" for item in output.cautions),
-    ]
-    return "\n\n".join(sections)

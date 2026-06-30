@@ -278,19 +278,11 @@ class RedisFeedbackRuntime(FeedbackResultPublisher):
                 if not known_streams:
                     await asyncio.sleep(self._scan_interval_seconds)
                     continue
-                response = await self._client.xreadgroup(
-                    groupname=self._consumer_group,
-                    consumername=self._consumer_name,
-                    streams={stream: ">" for stream in sorted(known_streams)},
-                    count=10,
-                    block=1000,
-                )
-                for stream_name, messages in response or []:
-                    for message_id, fields in messages:
-                        raw_event = fields.get("event")
-                        if raw_event:
-                            await self._processor.process_raw(raw_event)
-                        await self._client.xack(stream_name, self._consumer_group, message_id)
+                processed_any = False
+                for stream in sorted(known_streams):
+                    processed_any = await self._read_stream(stream) or processed_any
+                if not processed_any:
+                    await asyncio.sleep(self._scan_interval_seconds)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -322,6 +314,25 @@ class RedisFeedbackRuntime(FeedbackResultPublisher):
         except Exception as exc:
             if "BUSYGROUP" not in str(exc):
                 raise
+
+    async def _read_stream(self, stream: str) -> bool:
+        assert self._client is not None
+        response = await self._client.xreadgroup(
+            groupname=self._consumer_group,
+            consumername=self._consumer_name,
+            streams={stream: ">"},
+            count=10,
+            block=1,
+        )
+        processed = False
+        for stream_name, messages in response or []:
+            for message_id, fields in messages:
+                raw_event = fields.get("event")
+                if raw_event:
+                    await self._processor.process_raw(raw_event)
+                await self._client.xack(stream_name, self._consumer_group, message_id)
+                processed = True
+        return processed
 
 
 def _append_segment(

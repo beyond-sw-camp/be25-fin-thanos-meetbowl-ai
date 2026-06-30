@@ -33,21 +33,26 @@ class GeminiStructuredGenerationProvider:
         self, request: StructuredGenerationRequest
     ) -> StructuredGenerationResult:
         client = self._get_client()
+        config_kwargs: dict[str, Any] = {
+            "temperature": (
+                request.temperature
+                if request.temperature is not None
+                else self._default_temperature
+            ),
+            "response_mime_type": "application/json",
+            "response_json_schema": request.response_schema.model_json_schema(
+                by_alias=True
+            ),
+        }
+        if request.reasoning_budget is not None:
+            config_kwargs["thinking_config"] = types.ThinkingConfig(
+                thinking_budget=request.reasoning_budget
+            )
         try:
             response = await client.aio.models.generate_content(
                 model=self._model_name,
                 contents=request.prompt,
-                config=types.GenerateContentConfig(
-                    temperature=(
-                        request.temperature
-                        if request.temperature is not None
-                        else self._default_temperature
-                    ),
-                    response_mime_type="application/json",
-                    response_json_schema=request.response_schema.model_json_schema(
-                        by_alias=True
-                    ),
-                ),
+                config=types.GenerateContentConfig(**config_kwargs),
             )
         except ProviderUnavailableError:
             raise
@@ -62,7 +67,14 @@ class GeminiStructuredGenerationProvider:
             raise ResponseValidationError() from exc
         except ValueError as exc:
             raise ResponseParseError() from exc
-        return StructuredGenerationResult(output=output, model_name=self._model_name)
+        usage = getattr(response, "usage_metadata", None)
+        return StructuredGenerationResult(
+            output=output,
+            model_name=self._model_name,
+            input_tokens=_usage_count(usage, "prompt_token_count"),
+            output_tokens=_usage_count(usage, "candidates_token_count"),
+            reasoning_tokens=_usage_count(usage, "thoughts_token_count"),
+        )
 
     def _get_client(self) -> Any:
         if self._client is not None:
@@ -71,3 +83,8 @@ class GeminiStructuredGenerationProvider:
             raise ProviderUnavailableError("GEMINI_API_KEY가 설정되지 않았습니다.")
         self._client = genai.Client(api_key=self._api_key)
         return self._client
+
+
+def _usage_count(usage: Any, field: str) -> int | None:
+    value = getattr(usage, field, None)
+    return value if isinstance(value, int) else None

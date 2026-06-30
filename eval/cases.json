@@ -17,6 +17,18 @@
       "title": "거래처 미팅 메일",
       "content": "거래처와의 미팅은 다음 주 화요일 오후 2시로 확정되었습니다. 장소는 본사 3층 회의실입니다.",
       "created_at": "yesterday"
+    },
+    {
+      "document_type": "PERSONAL_DRIVE_FILE",
+      "title": "프롬프트 설계 적용 가이드",
+      "content": "프롬프트 처리 흐름은 사용자 입력 → 권한 검사 → 근거 검색 → 답변 생성 → 출력 검증 순서다. 구성요소별 책임은 백엔드의 인증과 워크스페이스 권한 검사, AI 서버의 Qdrant 근거 검색과 답변 생성, Pydantic 스키마의 출력 검증으로 분리한다. 구조화 출력은 answer와 citedIndices 계약을 사용한다. AI 모델이 인증이나 Qdrant 접근 필터를 대체하면 안 된다.",
+      "created_at": "today"
+    },
+    {
+      "document_type": "PERSONAL_DRIVE_FILE",
+      "title": "Harmony와 Safeguard 통합 가이드",
+      "content": "Harmony 메시지는 system, developer, user, assistant 역할과 channel을 포함하며 <|start|>{header}<|message|>{content}<|end|> 포맷을 사용한다. Safeguard 정책 문서는 Instruction, Definitions, Criteria, Examples, Output format으로 구성한다. 분류 결과 JSON은 label, category, action, reason을 가지며 Harmony 메시지 계약과 분리한다. Meetbowl에서는 콘텐츠 분류 보조 단계에 배치하되 인증과 워크스페이스 권한 검사는 백엔드에서 결정적으로 유지한다.",
+      "created_at": "today"
     }
   ],
   "cases": [
@@ -49,6 +61,22 @@
       "id": "refuse-offtopic",
       "question": "회사 주차장 위치 알려줘",
       "expect": { "refuses": true }
+    },
+    {
+      "id": "prompt-architecture",
+      "question": "프롬프트 설계를 Meetbowl 프로젝트에 적용할 아키텍처를 설명해줘",
+      "expect": {
+        "contains": ["처리 흐름", "권한", "Qdrant"],
+        "cites": "프롬프트 설계 적용 가이드"
+      }
+    },
+    {
+      "id": "harmony-safeguard",
+      "question": "gpt-oss를 Harmony와 safeguard 문서 기준으로 안전성 분류에 적용할 구조를 설계해줘",
+      "expect": {
+        "contains": ["Harmony", "Instruction", "label", "권한"],
+        "cites": "Harmony와 Safeguard 통합 가이드"
+      }
     }
   ]
 }

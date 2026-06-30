@@ -8,7 +8,7 @@ from html.parser import HTMLParser
 from typing import Any
 
 from pydantic_ai import Agent, RunContext
-from pydantic_ai.exceptions import ModelHTTPError
+from pydantic_ai.exceptions import ModelHTTPError, UsageLimitExceeded
 from pydantic_ai.models.fallback import FallbackExceptionGroup
 from pydantic_ai.usage import UsageLimits
 from pydantic_ai.messages import (
@@ -143,15 +143,10 @@ class PydanticAiChatProvider:
             )
             # threshold가 어떤 후보를 걸러내는지 추적: 컷 전 후보 점수와 컷 후 생존 자료를 함께 남긴다.
             logger.info(
-                "[chat-retrieval] query=%r searches=%r types=%s kept=%d",
-                query,
-                search_queries,
+                "[chat-retrieval] searches=%d types=%s kept=%d",
+                len(search_queries),
                 source_types,
                 len(sources),
-            )
-            logger.info(
-                "[chat-retrieval] kept sources(post-cut): %s",
-                [(s.title[:30], round(s.score, 4)) for s in sources],
             )
             _accumulate_sources(ctx.deps.retrieved_sources, sources)
             if not sources:
@@ -232,10 +227,11 @@ class PydanticAiChatProvider:
             retriever=self._retriever,
         )
         result = await self._run_with_retry(deps, command)
+        answer = _normalize_answer_format(result.output.answer)
         return ChatResult(
-            answer=_normalize_answer_format(result.output.answer),
-            sources=_select_cited_sources(
-                deps.retrieved_sources, result.output.cited_indices
+            answer=answer,
+            sources=_select_answer_sources(
+                deps.retrieved_sources, result.output.cited_indices, answer
             ),
             model=self._model_name,
             prompt_version=self._prompt_version,
@@ -267,6 +263,10 @@ class PydanticAiChatProvider:
                 await asyncio.sleep(self._retry_backoff_seconds * 2**attempt)
                 # 검색 Tool이 이전 시도에서 채운 citation이 다음 시도에 중복 누적되지 않게 비운다.
                 deps.retrieved_sources.clear()
+            except UsageLimitExceeded as error:
+                raise ProviderUnavailableError(
+                    "질문 처리에 필요한 검색 단계가 너무 많습니다. 질문을 나누어 다시 시도해주세요."
+                ) from error
 
 
 def _strip_citation_markers(text: str) -> str:
@@ -310,7 +310,7 @@ class _AnswerHtmlToTextParser(HTMLParser):
 
 def _normalize_answer_format(text: str) -> str:
     """HTML을 제거하고 긴 단일 문단을 최대 3문장 단위로 나눈다."""
-    cleaned = _strip_citation_markers(text)
+    cleaned = _strip_source_footer(_strip_citation_markers(text))
     if re.search(r"</?[a-zA-Z][^>]*>", cleaned):
         parser = _AnswerHtmlToTextParser()
         parser.feed(cleaned)
@@ -331,6 +331,24 @@ def _normalize_answer_format(text: str) -> str:
             ]
             cleaned = "\n\n".join(paragraphs)
     return cleaned
+
+
+def _strip_source_footer(text: str) -> str:
+    """모델이 본문에 생성한 출처 footer를 제거한다.
+
+    출처 표시는 ChatResult.sources 메타데이터 계약으로만 처리한다. 답변 본문에
+    "참고한 자료: ..."가 남으면 모델이 파일명을 만들어낸 것처럼 보이거나
+    프론트의 실제 출처 표시와 중복된다.
+    """
+    lines = text.splitlines()
+    source_heading_pattern = re.compile(
+        r"^\s*(참고한\s*자료|참고\s*자료|출처|sources?|references?)\s*[:：]",
+        re.IGNORECASE,
+    )
+    for index, line in enumerate(lines):
+        if source_heading_pattern.match(line):
+            return "\n".join(lines[:index]).strip()
+    return text.strip()
 
 
 def _is_retryable_overload(error: Exception) -> bool:
@@ -375,7 +393,9 @@ def _format_with_citation_numbers(
         for number, source in enumerate(accumulated, start=1)
     }
     return "\n\n".join(
-        f"[{index_by_id[source.resource_id]}] {source.title}\n{source.snippet}"
+        f"[{index_by_id[source.resource_id]}] {source.title}\n"
+        f"자료 유형: {source.type}\n"
+        f"본문:\n{source.snippet}"
         for source in shown
     )
 
@@ -394,6 +414,19 @@ def _select_cited_sources(
             seen.add(number)
             selected.append(accumulated[number - 1])
     return selected
+
+
+def _select_answer_sources(
+    accumulated: list[ChatSource], cited_indices: list[int], answer: str
+) -> list[ChatSource]:
+    """답변 출처를 선택한다.
+
+    모델이 cited_indices를 비워 보낸 경우 상위 검색 결과를 임의로 붙이지 않는다.
+    빠른 fallback은 노이즈 문서를 출처로 노출할 수 있으므로, 출처는 모델이 구조화
+    계약으로 명시한 번호만 사용한다.
+    """
+    del answer
+    return _select_cited_sources(accumulated, cited_indices)
 
 
 def _accumulate_sources(

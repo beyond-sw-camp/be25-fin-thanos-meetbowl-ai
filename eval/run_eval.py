@@ -11,11 +11,15 @@
 - cites: 출처 title 중 해당 문자열을 포함하는 것이 있어야 함
 - min_sources: 출처가 N개 이상이어야 함
 - refuses: 출처가 없고 답변이 '근거 없음'류여야 함(무근거 차단 검증)
+
+추론 예산 스윕:
+    uv run python eval/run_eval.py reasoning-sweep 0 128 256
 """
 
 import asyncio
 import json
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -27,6 +31,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.container import build_container
 from app.core.config import get_settings
+from app.rag.chat_router import route_chat_mode
 from app.schemas.chat import ChatCommand
 from app.schemas.indexing import AccessScope, DocumentMetadata, IndexDocumentCommand
 
@@ -119,6 +124,7 @@ async def _run_cases(
     total_sources = 0
     total_chars = 0
     for case in cases:
+        case_started = time.perf_counter()
         command = ChatCommand(
             request_id=uuid4(),
             correlation_id=uuid4(),
@@ -128,6 +134,7 @@ async def _run_cases(
             shared_workspace_ids=[],
         )
         result = await container.chat_workflow.execute(command)
+        elapsed_seconds = time.perf_counter() - case_started
         titles = [source.title for source in result.sources]
         total_sources += len(result.sources)
         total_chars += sum(len(source.snippet) for source in result.sources)
@@ -135,7 +142,10 @@ async def _run_cases(
         passed += ok
         if verbose:
             mark = "PASS" if ok else "FAIL"
-            print(f"[{mark}] {case['id']:<18} {reason}")
+            print(
+                f"[{mark}] {case['id']:<18} {reason} "
+                f"({elapsed_seconds:.2f}s)"
+            )
             if not ok:
                 print(f"        Q: {case['question']}")
                 print(f"        A: {result.answer[:160]}")
@@ -214,6 +224,77 @@ async def _sweep(values: list[int]) -> int:
     return 0
 
 
+async def _reasoning_sweep(values: list[int]) -> int:
+    """챗봇 reasoning budget별 cold/warm 정확도와 전체 시간을 비교한다.
+
+    budget마다 컨테이너를 새로 만들어 첫 실행은 process-local 질의 캐시가 빈 cold,
+    두 번째 실행은 같은 컨테이너를 재사용한 warm 조건으로 측정한다.
+    """
+    base = get_settings()
+    if not base.gemini_api_key:
+        print("GEMINI_API_KEY가 필요합니다(eval은 실제 임베딩·생성을 사용).")
+        return 2
+
+    data = _load_cases()
+    # 이 설정은 structured generation을 쓰는 single-pass에만 직접 적용된다.
+    # agentic 나열/건수 케이스를 섞으면 tool loop 지연이 결과를 오염시킨다.
+    cases = [
+        case
+        for case in data["cases"]
+        if route_chat_mode(case["question"]) == "single_pass"
+    ]
+    seed_container = build_container(base)
+    rows: list[tuple[int, int, int, float, int, int, float]] = []
+    try:
+        await _seed(seed_container, data["documents"])
+        await asyncio.sleep(1.0)
+        for budget in values:
+            settings = base.model_copy(update={"chat_thinking_budget": budget})
+            container = build_container(settings)
+            print(f"\n--- reasoning_budget={budget} cold ---", flush=True)
+            cold_started = time.perf_counter()
+            cold_passed, total, _, _ = await _run_cases(container, cases)
+            cold_seconds = time.perf_counter() - cold_started
+            print(f"cold total: {cold_seconds:.2f}s", flush=True)
+
+            print(f"\n--- reasoning_budget={budget} warm ---", flush=True)
+            warm_started = time.perf_counter()
+            warm_passed, _, _, _ = await _run_cases(container, cases)
+            warm_seconds = time.perf_counter() - warm_started
+            print(f"warm total: {warm_seconds:.2f}s", flush=True)
+            rows.append(
+                (
+                    budget,
+                    cold_passed,
+                    total,
+                    cold_seconds,
+                    warm_passed,
+                    total,
+                    warm_seconds,
+                )
+            )
+    finally:
+        await _cleanup(base)
+
+    print("\n=== reasoning budget 스윕 요약 ===")
+    print(
+        f"{'budget':>6} | {'cold 통과':>10} | {'cold 초':>8} | "
+        f"{'warm 통과':>10} | {'warm 초':>8}"
+    )
+    print("-" * 62)
+    for budget, cold_passed, total, cold_seconds, warm_passed, _, warm_seconds in rows:
+        print(
+            f"{budget:>6} | {cold_passed:>4}/{total:<4} | {cold_seconds:>8.2f} | "
+            f"{warm_passed:>4}/{total:<4} | {warm_seconds:>8.2f}"
+        )
+    print()
+    all_passed = all(
+        cold == total and warm == total
+        for _, cold, total, _, warm, _, _ in rows
+    )
+    return 0 if all_passed else 1
+
+
 if __name__ == "__main__":
     # 사용법:
     #   uv run python eval/run_eval.py                  → 기본 top_n으로 1회 평가
@@ -222,4 +303,7 @@ if __name__ == "__main__":
     if cli_args and cli_args[0] == "sweep":
         sweep_values = [int(value) for value in cli_args[1:]] or [5, 6, 8, 10]
         raise SystemExit(asyncio.run(_sweep(sweep_values)))
+    if cli_args and cli_args[0] == "reasoning-sweep":
+        reasoning_values = [int(value) for value in cli_args[1:]] or [0, 128, 256]
+        raise SystemExit(asyncio.run(_reasoning_sweep(reasoning_values)))
     raise SystemExit(asyncio.run(main()))
