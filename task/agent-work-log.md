@@ -62,3 +62,20 @@
 - 변경 근거: 검색과 피드백 유형 판정에는 전체 snippet을 계속 사용하고, 화면 전달 직전에만 축약해 탐지 정확도와 현재 Redis/STT/FE 계약 호환성을 유지한다.
 - 제외 범위: `headline` 신규 필드, STT Relay, FE 카드 UI와 누적 정책은 후속 계약 변경으로 남긴다.
 - 검증: 피드백 관련 테스트 17개, AI 전체 테스트 112개, Python compileall 및 `git diff --check` 통과.
+
+## 2026-07-01 Redis feedback consumer cluster 호환성 수정
+
+- 목적: ElastiCache Serverless/cluster 환경에서 실시간 피드백 consumer가 `Keys in request don't hash to the same slot` 오류로 반복 실패하던 문제를 해결한다.
+- 변경 파일: `app/consumers/redis_feedback.py`
+- 변경 동작:
+  - 기존에는 여러 `meeting:*:feedback-source` stream을 한 번의 `XREADGROUP` 호출로 함께 읽었다.
+  - 이제는 stream별로 개별 `XREADGROUP`를 호출해 Redis cluster의 cross-slot 제약을 피한다.
+  - 메시지 처리와 `XACK` 흐름, producer/STT 쪽 stream key 형식은 유지한다.
+- 변경 근거:
+  - 운영 Redis가 단일 노드가 아니라 cluster/serverless 모드이므로, 멀티키 stream read는 같은 hash slot을 강제하지 않으면 실패한다.
+  - producer key 네이밍을 전면 변경하는 것보다 consumer를 단일 stream poll 방식으로 바꾸는 편이 운영 전환 리스크가 작다.
+- 제외 범위:
+  - `meeting:{meetingId}:feedback-source` / `feedback-result` key naming 계약은 변경하지 않았다.
+  - STT relay 로직과 피드백 workflow 판정 규칙은 변경하지 않았다.
+- 검증:
+  - `python3 -m compileall app` 통과.
