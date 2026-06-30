@@ -79,3 +79,15 @@
   - STT relay 로직과 피드백 workflow 판정 규칙은 변경하지 않았다.
 - 검증:
   - `python3 -m compileall app` 통과.
+
+## 2026-07-01 Qdrant feedback search 오류 상세화
+
+- 목적: 실시간 피드백 workflow가 `Qdrant 피드백 검색에 실패했습니다.`만 남겨 실제 장애 원인(연결 실패, 404, 400, 컬렉션 문제)을 구분할 수 없던 문제를 해결한다.
+- 변경 파일: `app/rag/qdrant_feedback.py`
+- 변경 동작:
+  - Qdrant HTTP status 오류 시 상태코드, collection 이름, 응답 body 일부를 포함한 메시지로 변환한다.
+  - 네트워크/클라이언트 오류 시에도 collection 이름과 예외 이유를 함께 남긴다.
+- 제외 범위:
+  - Qdrant 검색 필터, collection 이름, feedback 판정 규칙은 변경하지 않았다.
+- 검증:
+  - `python3 -m compileall app/rag/qdrant_feedback.py` 통과.
