@@ -8,14 +8,15 @@ def build_chat_access_filter(
 ) -> dict[str, Any]:
     """BE가 계산한 현재 권한만 사용해 Qdrant 검색 범위를 구성한다.
 
-    접근 판정은 소유자(ownerUserId)와 공유 워크스페이스 멤버십만으로 한다. 이 둘은 전역 고유 UUID라
-    조직 경계(organizationId) 없이도 타 사용자 자료가 노출되지 않으며, 덕분에 조직 미소속 사용자도
-    본인 개인자료(메모/메일/개인워크/회의록)와 접근 가능한 공유 자료를 모두 검색할 수 있다.
+    접근 판정은 소유자(ownerUserId), 명시 열람 사용자(allowedUserIds), 공유 워크스페이스 범위로 한다.
+    이 값들은 BE가 매 요청/색인 시점에 계산한 권한 범위라, 조직 경계(organizationId) 없이도 타 사용자
+    자료가 노출되지 않는다. 덕분에 조직 미소속 사용자도 본인 개인자료와 접근 가능한 공유 자료를 검색할 수 있다.
 
     `source_types`가 주어지면 해당 자료 유형으로 검색을 좁힌다(권한은 그대로 유지).
     """
     access_should: list[dict[str, Any]] = [
-        {"key": "ownerUserId", "match": {"value": str(command.user_id)}}
+        {"key": "ownerUserId", "match": {"value": str(command.user_id)}},
+        {"key": "allowedUserIds", "match": {"any": [str(command.user_id)]}},
     ]
     if command.shared_workspace_ids:
         workspace_ids = [str(value) for value in command.shared_workspace_ids]
